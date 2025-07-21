@@ -1,112 +1,218 @@
+"""
+Simple Pinecone HTTP client to avoid Rust compilation issues
+Uses direct HTTP requests instead of the official client
+"""
+
+import aiohttp
 import hashlib
 import json
 import logging
 from typing import List, Dict, Any, Optional
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-class PineconeManager:
+class SimplePineconeClient:
     """
-    Pinecone vector database manager for storing and retrieving research results
+    Simple HTTP-based Pinecone client to avoid Rust dependencies
     """
     
     def __init__(self):
         self.api_key = None
         self.environment = None
         self.index_name = None
-        self.index = None
+        self.base_url = None
         self.available = False
         
-        # Try to initialize Pinecone
-        self._initialize_pinecone()
+        # Try to initialize
+        self._initialize()
     
-    def _initialize_pinecone(self):
-        """Initialize Pinecone connection"""
+    def _initialize(self):
+        """Initialize Pinecone connection settings"""
         try:
-            from app.config import settings
+            import os
             
-            if not settings.pinecone_api_key:
+            self.api_key = os.getenv("PINECONE_API_KEY")
+            self.environment = os.getenv("PINECONE_ENVIRONMENT", "gcp-starter")
+            self.index_name = os.getenv("PINECONE_INDEX_NAME", "medical-research")
+            
+            if not self.api_key:
                 logger.warning("Pinecone API key not provided. Vector storage will be disabled.")
                 return
             
-            # Import pinecone here to avoid import errors if not installed
-            import pinecone
-            
-            pinecone.init(
-                api_key=settings.pinecone_api_key,
-                environment=settings.pinecone_environment
-            )
-            
-            self.api_key = settings.pinecone_api_key
-            self.environment = settings.pinecone_environment
-            self.index_name = settings.pinecone_index_name
+            # Construct base URL for Pinecone API
+            self.base_url = f"https://{self.index_name}-{self.environment}.svc.pinecone.io"
             self.available = True
             
-            logger.info("Pinecone initialized successfully")
+            logger.info("Simple Pinecone client initialized successfully")
             
-        except ImportError:
-            logger.warning("Pinecone package not installed. Vector storage will be disabled.")
         except Exception as e:
-            logger.error(f"Error initializing Pinecone: {e}")
+            logger.error(f"Error initializing Pinecone client: {e}")
+    
+    async def _make_request(self, method: str, endpoint: str, data: Dict = None) -> Dict:
+        """Make HTTP request to Pinecone API"""
+        if not self.available:
+            return {"error": "Pinecone not available"}
+        
+        url = f"{self.base_url}{endpoint}"
+        headers = {
+            "Api-Key": self.api_key,
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                if method.upper() == "GET":
+                    async with session.get(url, headers=headers) as response:
+                        return await response.json()
+                elif method.upper() == "POST":
+                    async with session.post(url, headers=headers, json=data) as response:
+                        return await response.json()
+                else:
+                    return {"error": f"Unsupported method: {method}"}
+                    
+        except Exception as e:
+            logger.error(f"Pinecone API request failed: {e}")
+            return {"error": str(e)}
     
     async def initialize_index(self, dimension: int = 1536):
-        """Initialize Pinecone index if it doesn't exist"""
+        """Initialize index (Note: Index creation requires Pinecone console)"""
         if not self.available:
             logger.warning("Pinecone not available. Skipping index initialization.")
             return False
         
         try:
-            import pinecone
+            # Test if index exists by making a simple stats call
+            stats = await self._make_request("GET", "/describe_index_stats")
             
-            # Check if index exists
-            existing_indexes = pinecone.list_indexes()
-            if self.index_name not in existing_indexes:
-                logger.info(f"Creating Pinecone index: {self.index_name}")
-                pinecone.create_index(
-                    name=self.index_name,
-                    dimension=dimension,
-                    metric="cosine"
-                )
-            
-            self.index = pinecone.Index(self.index_name)
-            logger.info(f"Pinecone index {self.index_name} ready")
-            return True
-            
+            if "error" not in stats:
+                logger.info(f"Pinecone index {self.index_name} is ready")
+                return True
+            else:
+                logger.warning(f"Pinecone index {self.index_name} may not exist. Create it in Pinecone console.")
+                return False
+                
         except Exception as e:
-            logger.error(f"Error initializing Pinecone index: {e}")
+            logger.error(f"Error checking Pinecone index: {e}")
             return False
     
     def generate_id(self, content: str) -> str:
         """Generate unique ID for content"""
         return hashlib.md5(content.encode()).hexdigest()
     
+    async def upsert(self, vectors: List[Dict]) -> bool:
+        """Upsert vectors into Pinecone index"""
+        if not self.available:
+            logger.warning("Pinecone not available. Skipping vector upsert.")
+            return False
+        
+        try:
+            data = {"vectors": vectors}
+            result = await self._make_request("POST", "/vectors/upsert", data)
+            
+            if "error" not in result:
+                logger.info(f"Successfully upserted {len(vectors)} vectors")
+                return True
+            else:
+                logger.error(f"Vector upsert failed: {result.get('error')}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error upserting vectors: {e}")
+            return False
+    
+    async def query(self, vector: List[float], top_k: int = 5, 
+                   include_metadata: bool = True) -> List[Dict]:
+        """Query similar vectors"""
+        if not self.available:
+            logger.warning("Pinecone not available. Cannot query vectors.")
+            return []
+        
+        try:
+            data = {
+                "vector": vector,
+                "topK": top_k,
+                "includeMetadata": include_metadata
+            }
+            
+            result = await self._make_request("POST", "/query", data)
+            
+            if "error" not in result and "matches" in result:
+                return result["matches"]
+            else:
+                logger.error(f"Vector query failed: {result.get('error', 'Unknown error')}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error querying vectors: {e}")
+            return []
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get client status"""
+        return {
+            'available': self.available,
+            'index_name': self.index_name,
+            'environment': self.environment,
+            'base_url': self.base_url,
+            'client_type': 'simple_http_client'
+        }
+
+class PineconeManager:
+    """
+    Vector database manager using simple HTTP client
+    """
+    
+    def __init__(self):
+        self.client = SimplePineconeClient()
+        self.available = self.client.available
+        
+    async def initialize_index(self, dimension: int = 1536):
+        """Initialize Pinecone index"""
+        return await self.client.initialize_index(dimension)
+    
+    def generate_id(self, content: str) -> str:
+        """Generate unique ID for content"""
+        return self.client.generate_id(content)
+    
     async def store_research(self, research_data: Dict[str, Any], 
                            embedding: Optional[List[float]] = None) -> bool:
         """Store research results in vector database"""
-        if not self.available or not self.index:
-            logger.warning("Pinecone not available. Research not stored in vector database.")
+        if not self.available:
+            logger.warning("Vector storage not available. Research not stored.")
+            return False
+        
+        if not embedding:
+            logger.warning("No embedding provided for vector storage.")
             return False
         
         try:
             research_id = self.generate_id(research_data['query'])
             
-            # If no embedding provided, create a placeholder or skip
-            if not embedding:
-                logger.warning("No embedding provided. Skipping vector storage.")
-                return False
-            
+            # Prepare metadata (Pinecone has limits on metadata size)
             metadata = {
-                'query': research_data['query'][:1000],  # Limit metadata size
+                'query': research_data['query'][:500],  # Truncate long queries
                 'therapy_area': research_data.get('therapy_area', 'general'),
                 'research_type': research_data.get('research_type', 'literature_review'),
-                'timestamp': research_data.get('timestamp'),
-                'sources_count': research_data.get('sources_analyzed', 0)
+                'timestamp': research_data.get('timestamp', ''),
+                'sources_count': min(research_data.get('sources_analyzed', 0), 9999)  # Ensure it's a reasonable number
             }
             
-            self.index.upsert(vectors=[(research_id, embedding, metadata)])
-            logger.info(f"Research stored in vector database with ID: {research_id}")
-            return True
+            # Prepare vector for upsert
+            vector_data = [{
+                "id": research_id,
+                "values": embedding,
+                "metadata": metadata
+            }]
             
+            success = await self.client.upsert(vector_data)
+            
+            if success:
+                logger.info(f"Research stored in vector database with ID: {research_id}")
+                return True
+            else:
+                logger.error("Failed to store research in vector database")
+                return False
+                
         except Exception as e:
             logger.error(f"Error storing research in vector database: {e}")
             return False
@@ -114,30 +220,86 @@ class PineconeManager:
     async def search_similar(self, query_embedding: List[float], 
                            top_k: int = 5) -> List[Dict]:
         """Search for similar research"""
-        if not self.available or not self.index:
-            logger.warning("Pinecone not available. Cannot search similar research.")
+        if not self.available:
+            logger.warning("Vector search not available.")
             return []
         
         try:
-            results = self.index.query(
+            matches = await self.client.query(
                 vector=query_embedding,
                 top_k=top_k,
                 include_metadata=True
             )
-            return results.matches
+            return matches
             
         except Exception as e:
             logger.error(f"Error searching similar research: {e}")
             return []
     
     def get_status(self) -> Dict[str, Any]:
-        """Get Pinecone connection status"""
-        return {
-            'available': self.available,
-            'index_name': self.index_name,
-            'environment': self.environment,
-            'index_ready': self.index is not None
-        }
+        """Get vector store status"""
+        return self.client.get_status()
 
 # Initialize global vector store instance
 vector_store = PineconeManager()
+
+# Mock vector store for when Pinecone is not available
+class MockVectorStore:
+    """Mock vector store for development/testing when Pinecone is not available"""
+    
+    def __init__(self):
+        self.storage = {}  # In-memory storage for testing
+        self.available = True
+    
+    async def initialize_index(self, dimension: int = 1536):
+        """Mock index initialization"""
+        logger.info("Mock vector store initialized")
+        return True
+    
+    def generate_id(self, content: str) -> str:
+        """Generate unique ID"""
+        return hashlib.md5(content.encode()).hexdigest()
+    
+    async def store_research(self, research_data: Dict[str, Any], 
+                           embedding: Optional[List[float]] = None) -> bool:
+        """Mock storage"""
+        research_id = self.generate_id(research_data['query'])
+        self.storage[research_id] = {
+            'data': research_data,
+            'embedding': embedding
+        }
+        logger.info(f"Research stored in mock vector store with ID: {research_id}")
+        return True
+    
+    async def search_similar(self, query_embedding: List[float], 
+                           top_k: int = 5) -> List[Dict]:
+        """Mock similarity search"""
+        # Return mock similar results
+        mock_matches = []
+        for i, (research_id, stored_data) in enumerate(list(self.storage.items())[:top_k]):
+            mock_matches.append({
+                'id': research_id,
+                'score': 0.9 - (i * 0.1),  # Mock decreasing similarity scores
+                'metadata': {
+                    'query': stored_data['data'].get('query', ''),
+                    'therapy_area': stored_data['data'].get('therapy_area', ''),
+                    'timestamp': stored_data['data'].get('timestamp', '')
+                }
+            })
+        return mock_matches
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get mock status"""
+        return {
+            'available': True,
+            'index_name': 'mock-index',
+            'environment': 'mock',
+            'stored_items': len(self.storage),
+            'client_type': 'mock_vector_store'
+        }
+
+# If Pinecone is not available, use mock store
+if not vector_store.available:
+    logger.warning("Pinecone not available. Using mock vector store for development.")
+    # Uncomment the line below if you want to use mock storage for testing
+    # vector_store = MockVectorStore()
