@@ -83,10 +83,10 @@ class CompetitiveIntelligence(BaseModel):
 
 class ClinicalTrialsAnalysis(BaseModel):
     development_landscape: str
-    phase_distribution: Dict[str, int]  # <<< THIS IS THE FIX
+    phase_distribution: Dict[str, int]
     key_sponsors: List[str]
     primary_endpoints: List[str]
-    development_timelines: Dict[str, str]
+    development_timelines: Dict[str, Any]  # <<< THIS IS THE FIX
     regulatory_pathways: List[str]
     strategic_recommendations: List[str]
     confidence_score: float
@@ -124,7 +124,7 @@ class CompetitiveRequest(BaseModel):
 class ComprehensiveRequest(BaseModel):
     query: str
     therapy_area: str = "general"
-    
+
     class Config:
         extra = Extra.allow
 
@@ -148,20 +148,20 @@ class ResearchTools:
             start_date = end_date - timedelta(days=days_back)
             date_range = f"{start_date.strftime('%Y/%m/%d')}:{end_date.strftime('%Y/%m/%d')}"
             enhanced_query = f"({query}) AND {date_range}[pdat] AND (clinical trial[ptyp] OR systematic review[ptyp])"
-            
+
             search_url = f"{self.pubmed_base_url}/esearch.fcgi"
             params = {
                 'db': 'pubmed', 'term': enhanced_query, 'retmax': max_results,
                 'retmode': 'json', 'sort': 'relevance', 'tool': 'medical_research_agent', 'email': self.email
             }
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(search_url, params=params, timeout=30) as response:
                     if response.status == 200:
                         data = await response.json()
                         pmids = data.get('esearchresult', {}).get('idlist', [])
                         logger.info(f"Found {len(pmids)} PMIDs for query: {query}")
-                        
+
                         sources = []
                         for i, pmid in enumerate(pmids):
                             sources.append(ResearchSource(
@@ -350,23 +350,23 @@ class MedicalResearchOrchestrator:
 # ================================
 
 orchestrator = MedicalResearchOrchestrator()
-app = FastAPI(title="Medical Research Agent System", version="4.2.0")
+app = FastAPI(title="Medical Research Agent System", version="4.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 async def root():
-    return {"message": "Medical Research Agent System v4.2.0"}
+    return {"message": "Medical Research Agent System v4.3.0"}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "4.2.0", "timestamp": datetime.now().isoformat()}
+    return {"status": "healthy", "version": "4.3.0", "timestamp": datetime.now().isoformat()}
 
 @app.post("/research/comprehensive")
 async def comprehensive_research(request: ComprehensiveRequest):
     """Conduct comprehensive, multi-agent research."""
     request_dict = request.model_dump()
     query = request_dict.pop("query")
-    therapy_area = request_dict.pop("therapy_area")
+    therapy_area = request_dict.pop("therapy_area", "general")
     return await orchestrator.execute_comprehensive_research(query=query, therapy_area=therapy_area, **request_dict)
 
 if __name__ == "__main__":
