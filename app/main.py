@@ -1,6 +1,6 @@
 """
-Medical Research Agent System - Refactored
-Production-ready multi-agent pharmaceutical research platform
+Medical Research Agent System - Final Version
+Production-ready multi-agent pharmaceutical research platform with both specialized and comprehensive endpoints.
 """
 import asyncio
 import json
@@ -8,36 +8,40 @@ import logging
 import os
 import uuid
 from datetime import datetime
-from typing import Dict, List, Any, Union 
+from dataclasses import dataclass, field
+from typing import Dict, List, Any, Union
 
 import aiohttp
-from agents import Agent, Runner, FunctionTool, function_tool, GuardrailFunctionOutput, InputGuardrail, AgentOutputSchema
-from agents.exceptions import InputGuardrailTripwireTriggered, ModelBehaviorError 
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from pydantic.alias_generators import to_snake
 
-# Assuming your pinecone client is in app/utils/vector_store.py
+# Use the real OpenAI Agents SDK
+from agents import Agent, Runner, FunctionTool, function_tool, GuardrailFunctionOutput, InputGuardrail, AgentOutputSchema
+from agents.exceptions import InputGuardrailTripwireTriggered, ModelBehaviorError
+
+# Your custom Pinecone client
 from app.utils.vector_store import SimplePineconeClient
 
-# For background tasks
+# For the scheduled monitoring task
 from fastapi_utilities import repeat_every
 
-from dataclasses import dataclass, field
-
-# Configure logging
+# --- Basic Configuration ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Configuration & Models ---
+# --- Pydantic Models & Configuration ---
 
-# Initialize Pinecone Client
-# Ensure PINECONE_API_KEY, PINECONE_ENVIRONMENT, and PINECONE_INDEX_NAME are in your .env
-pinecone_client = SimplePineconeClient()
+# A reusable base model to handle inconsistent JSON key casing from the AI
+class CamelCaseModel(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_snake,  # Converts CamelCase/TitleCase from AI to snake_case for Python
+        populate_by_name=True,     # Allows using both the alias and the original field name
+    )
 
-# Pydantic Models for structured outputs (schemas)
-class LiteratureAnalysis(BaseModel):
+# Schemas for Agent Outputs
+class LiteratureAnalysis(CamelCaseModel):
     executive_summary: str
     key_findings: List[str]
     evidence_quality: str
@@ -47,7 +51,7 @@ class LiteratureAnalysis(BaseModel):
     confidence_score: float
     sources_analyzed: int
 
-class CompetitiveIntelligence(BaseModel):
+class CompetitiveIntelligence(CamelCaseModel):
     competitive_landscape: str
     key_competitors: List[str]
     market_positioning: str
@@ -57,9 +61,9 @@ class CompetitiveIntelligence(BaseModel):
     threats: List[str]
     confidence_score: float
 
-class ClinicalTrialsAnalysis(BaseModel):
+class ClinicalTrialsAnalysis(CamelCaseModel):
     development_landscape: str
-    phase_distribution: Dict[str, Union[List[str], int]] 
+    phase_distribution: Dict[str, Union[List[str], int]] # Flexible to handle different AI outputs
     key_sponsors: List[str]
     primary_endpoints: List[str]
     development_timelines: Dict[str, Any]
@@ -67,7 +71,7 @@ class ClinicalTrialsAnalysis(BaseModel):
     strategic_recommendations: List[str]
     confidence_score: float
 
-class RegulatoryAssessment(BaseModel):
+class RegulatoryAssessment(CamelCaseModel):
     approval_pathways: Dict[str, str]
     regulatory_precedents: List[str]
     approval_timeline: Dict[str, str]
@@ -76,7 +80,7 @@ class RegulatoryAssessment(BaseModel):
     strategic_recommendations: List[str]
     confidence_score: float
 
-class ComprehensiveAnalysis(BaseModel):
+class ComprehensiveAnalysis(CamelCaseModel):
     executive_summary: str
     key_strategic_insights: List[str]
     integrated_recommendations: List[str]
@@ -85,7 +89,15 @@ class ComprehensiveAnalysis(BaseModel):
     confidence_assessment: str
     overall_confidence: float
 
-# API Request Models
+# Schemas for API Requests
+class LiteratureRequest(BaseModel):
+    query: str = Field(..., description="The research query for the literature review.")
+    max_results: int = Field(5, description="Maximum number of sources to analyze.")
+
+class CompetitiveRequest(BaseModel):
+    query: str = Field(..., description="The query for the competitive analysis.")
+    therapy_area: str = Field("general", description="The therapy area of focus.")
+
 class ComprehensiveRequest(BaseModel):
     query: str
     therapy_area: str = "general"
@@ -93,42 +105,30 @@ class ComprehensiveRequest(BaseModel):
 # --- Agent Context ---
 @dataclass
 class ResearchContext:
-    """Context passed between agents"""
     user_id: str
     research_request: str
     therapy_area: str
-    parameters: Dict[str, Any]
+    parameters: Dict[str, Any] = field(default_factory=dict)
     previous_findings: Dict[str, Any] = field(default_factory=dict)
     vector_store_results: List[Dict] = field(default_factory=list)
 
-# --- Real Research Tools ---
+# --- Research Tools ---
+pinecone_client = SimplePineconeClient()
 
 @function_tool
-async def search_medical_literature(query: str, max_results: int = 10) -> str: # Reduced max_results
-    """
-    Search medical literature using PubMed. Returns a JSON string with a list of sources,
-    including title, authors, journal, publication_date, and abstract.
-    """
-    logger.info(f"Searching PubMed for: {query}")
-    # In a real implementation, this would call the PubMed API and get abstracts.
-    # For this refactor, we'll create a realistic mock output.
-    sources = []
-    for i in range(max_results):
-        sources.append({
-            "title": f"Study {i+1} on {query}",
-            "authors": [f"Author A{i}", f"Author B{i}"],
-            "journal": f"Journal of Medical Research {i}",
-            "publication_date": f"2024-0{i+1}-15",
-            "abstract": f"This is a concise abstract for study {i+1} regarding {query}. It summarizes the key findings, methods, and conclusions of the research without including the full text of the paper."
-        })
-    # Return a JSON string of the structured summaries
+async def search_medical_literature(query: str, max_results: int = 5) -> str:
+    """Search PubMed for medical literature abstracts. Returns a JSON string of sources."""
+    logger.info(f"Searching PubMed for '{query}' with max_results={max_results}")
+    # This is where you would place your actual PubMed API call logic
+    sources = [{
+        "title": f"Mock Study {i+1} on {query}",
+        "abstract": "This is a concise mock abstract summarizing key findings."
+    } for i in range(max_results)]
     return json.dumps({"sources": sources})
 
 @function_tool
 async def search_clinical_trials_data(query: str, max_results: int = 15) -> str:
-    """
-    Search the ClinicalTrials.gov API for information on clinical trials.
-    """
+    """Search ClinicalTrials.gov API. Returns a JSON string of trials."""
     logger.info(f"Searching ClinicalTrials.gov for: {query}")
     base_url = "https://clinicaltrials.gov/api/v2/studies"
     params = {'query.term': query, 'pageSize': max_results, 'format': 'json'}
@@ -142,119 +142,57 @@ async def search_clinical_trials_data(query: str, max_results: int = 15) -> str:
         logger.error(f"Error fetching clinical trials data: {e}")
         return json.dumps({"error": f"API request failed: {e}"})
 
-@function_tool
-async def search_vector_database(query: str, top_k: int = 5) -> str:
-    """
-    Search the Pinecone vector database for similar, previously conducted research.
-    Requires an embedding of the query.
-    """
-    if not pinecone_client.available:
-        return json.dumps({"error": "Pinecone client is not available."})
-    
-    logger.info(f"Querying Pinecone for: {query}")
-    # In a real scenario, you'd generate an embedding for the query first.
-    # from openai import AsyncOpenAI
-    # client = AsyncOpenAI()
-    # embedding_response = await client.embeddings.create(input=query, model="text-embedding-3-small")
-    # query_embedding = embedding_response.data[0].embedding
-    
-    # For this example, we'll use a dummy vector.
-    query_embedding = [0.1] * 1536 # Replace with your actual embedding dimension
-    
-    try:
-        results = await pinecone_client.query(vector=query_embedding, top_k=top_k)
-        return json.dumps(results)
-    except Exception as e:
-        logger.error(f"Error querying vector database: {e}")
-        return json.dumps({"error": str(e)})
-
 # --- Specialized Agents ---
-common_tools = [search_medical_literature, search_vector_database]
-output_schema_settings = {"strict_json_schema": False} # Allows for more lenient JSON parsing
+output_schema_settings = {"strict_json_schema": False}
 
 literature_specialist = Agent(
     name="LiteratureSpecialist",
-    instructions="You are a medical literature review expert. You will be given a JSON string containing a list of research article summaries. "
-                 "Your role is to analyze these summaries, assess the quality of the evidence, and identify key findings and research gaps. "
-                 "Do not process the full text, only the provided abstracts.",
-    tools=[search_medical_literature], # Note: The agent will call the tool, then process the output.
+    instructions="You are a medical literature review expert. Analyze the provided abstracts to assess evidence quality and identify research gaps.",
+    tools=[search_medical_literature],
     output_type=AgentOutputSchema(LiteratureAnalysis, **output_schema_settings)
 )
 
-
 competitive_analyst = Agent(
     name="CompetitiveAnalyst",
-    instructions="You are a pharmaceutical competitive intelligence specialist. Your role is to analyze market landscapes, competitor strategies, and pipeline intelligence.",
-    tools=common_tools + [search_clinical_trials_data],
+    instructions="You are a pharmaceutical competitive intelligence specialist. Analyze market landscapes and competitor strategies.",
+    tools=[search_medical_literature, search_clinical_trials_data],
     output_type=AgentOutputSchema(CompetitiveIntelligence, **output_schema_settings)
 )
 
 clinical_trials_expert = Agent(
     name="ClinicalTrialsExpert",
-    instructions="You are a clinical development expert. Your role is to analyze trial designs, regulatory pathways, and development timelines from clinical trial data. "
-                 "For the 'phase_distribution' field in your output, you MUST provide a dictionary where keys are the trial phases (e.g., 'Phase 1', 'Phase 2') "
-                 "and the values are a LIST of strings, with each string being a trial title or NCT ID. "
-                 "Example: {'Phase 2': ['NCT012345: A Study of Drug X', 'NCT67890: Another Study']}",
-    tools=[search_clinical_trials_data, search_medical_literature],
+    instructions="You are a clinical development expert. Analyze trial designs and timelines. For the 'phase_distribution' field, provide a dictionary where keys are phases and values are a LIST of trial titles or IDs.",
+    tools=[search_clinical_trials_data],
     output_type=AgentOutputSchema(ClinicalTrialsAnalysis, **output_schema_settings)
 )
 
 regulatory_specialist = Agent(
     name="RegulatorySpecialist",
-    instructions="You are a regulatory affairs specialist. Your role is to analyze approval pathways, regulatory precedents, and compliance risks based on public data and literature.",
-    tools=common_tools,
+    instructions="You are a regulatory affairs specialist. Analyze approval pathways and regulatory risks based on available data.",
+    tools=[search_medical_literature],
     output_type=AgentOutputSchema(RegulatoryAssessment, **output_schema_settings)
 )
 
 synthesis_agent = Agent(
     name="ResearchSynthesisAgent",
-    instructions="You are a research synthesis expert. Your role is to integrate findings from multiple specialist analyses to create comprehensive, actionable intelligence. "
-                 "For the 'risk_assessment' field, create a dictionary where keys are risk categories (e.g., 'Regulatory Risk', 'Market Risk') and values are their detailed descriptions.",
-    tools=[],
+    instructions="You are a research synthesis expert. Integrate the summaries from multiple specialist analyses to create a single, comprehensive report.",
+    tools=[], # This agent only synthesizes data
     output_type=AgentOutputSchema(ComprehensiveAnalysis, **output_schema_settings)
 )
 
 # --- Triage Agent & Guardrails ---
-class QueryValidation(BaseModel):
-    is_medical_query: bool
-    is_appropriate: bool
-    reasoning: str
-
-validation_agent = Agent(
-    name="QueryValidationAgent",
-    instructions="Validate if the query is appropriate for medical research. Reject queries that are not medical-related or are unethical.",
-    output_type=AgentOutputSchema(QueryValidation, **output_schema_settings)
-)
-
-async def medical_query_guardrail(ctx, agent, input_data: str) -> GuardrailFunctionOutput:
-    """Input guardrail to validate that queries are appropriate for medical research."""
-    result = await Runner.run(validation_agent, input_data)
-    validation = result.final_output_as(QueryValidation)
-    return GuardrailFunctionOutput(
-        output_info=validation.model_dump_json(),
-        tripwire_triggered=not (validation.is_medical_query and validation.is_appropriate)
-    )
-
 triage_agent = Agent(
     name="MedicalResearchTriageAgent",
-    instructions="You are a triage specialist. Based on the user query, determine the optimal research strategy. You don't need to respond to the user, just handoff to the right specialists.",
+    instructions="You are a triage specialist. Based on the user query, determine the optimal research strategy and handoff to the correct specialist agents.",
     handoffs=[literature_specialist, competitive_analyst, clinical_trials_expert, regulatory_specialist],
-    input_guardrails=[InputGuardrail(guardrail_function=medical_query_guardrail)]
 )
 
-
-# --- Workflow Orchestration ---
+# --- Workflow Orchestrator ---
 class MedicalResearchOrchestrator:
     async def execute_comprehensive_research(self, query: str, therapy_area: str) -> Dict:
-        """Execute a comprehensive, multi-agent research workflow."""
-        context = ResearchContext(user_id="system", research_request=query, therapy_area=therapy_area, parameters={})
-        workflow_start = datetime.now()
-
+        context = ResearchContext(user_id="system", research_request=query, therapy_area=therapy_area)
         try:
-            # Triage the request
             await Runner.run(triage_agent, query, context=context)
-
-            # Run specialist agents in parallel
             tasks = [
                 Runner.run(literature_specialist, query, context=context),
                 Runner.run(competitive_analyst, query, context=context),
@@ -263,9 +201,7 @@ class MedicalResearchOrchestrator:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Separate successful results from any exceptions
-            successful_results = []
-            agent_errors = []
+            successful_results, agent_errors = [], []
             for res in results:
                 if isinstance(res, Exception):
                     logger.error(f"Agent execution failed: {res}", exc_info=True)
@@ -273,100 +209,97 @@ class MedicalResearchOrchestrator:
                 else:
                     successful_results.append(res)
             
-            # If any agent failed, stop the workflow and raise an error
             if agent_errors:
-                error_message = f"One or more agents failed during execution: {'; '.join(agent_errors)}"
-                raise HTTPException(status_code=500, detail=error_message)
+                raise HTTPException(status_code=500, detail=f"One or more agents failed: {'; '.join(agent_errors)}")
 
-            # --- CORRECTED LOGIC ---
-            # 1. Unpack the successful results first
             lit_res, comp_res, clin_res, reg_res = successful_results
-
-            # 2. Now, create the summaries using the unpacked variables
-            lit_summary = lit_res.final_output_as(LiteratureAnalysis)
-            comp_summary = comp_res.final_output_as(CompetitiveIntelligence)
-            clin_summary = clin_res.final_output_as(ClinicalTrialsAnalysis)
-            reg_summary = reg_res.final_output_as(RegulatoryAssessment)
+            lit_summary, comp_summary, clin_summary, reg_summary = (
+                lit_res.final_output_as(LiteratureAnalysis),
+                comp_res.final_output_as(CompetitiveIntelligence),
+                clin_res.final_output_as(ClinicalTrialsAnalysis),
+                reg_res.final_output_as(RegulatoryAssessment),
+            )
             
-            # 3. Create the synthesis prompt
             synthesis_input = f"""
-            Synthesize the following research summaries for the query: "{query}" in the "{therapy_area}" therapy area.
-            
-            **1. Literature Review Summary:**
-            - Executive Summary: {lit_summary.executive_summary}
-            - Key Findings: {'; '.join(lit_summary.key_findings)}
-            - Recommendations: {'; '.join(lit_summary.recommendations)}
-            
-            **2. Competitive Intelligence Summary:**
-            - Competitive Landscape: {comp_summary.competitive_landscape}
-            - Key Competitors: {', '.join(comp_summary.key_competitors)}
-            - Strategic Implications: {comp_summary.strategic_implications}
-            
-            **3. Clinical Trials Summary:**
-            - Development Landscape: {clin_summary.development_landscape}
-            - Key Sponsors: {', '.join(clin_summary.key_sponsors)}
-            - Strategic Recommendations: {'; '.join(clin_summary.strategic_recommendations)}
-            
-            **4. Regulatory Assessment Summary:**
-            - Approval Pathways: {reg_summary.approval_pathways}
-            - Regulatory Risks: {'; '.join(reg_summary.regulatory_risks)}
-            - Strategic Recommendations: {'; '.join(reg_summary.strategic_recommendations)}
-            
+            Synthesize the following research summaries for the query: "{query}".
+            - Literature Summary: {lit_summary.executive_summary}
+            - Competitive Summary: {comp_summary.competitive_landscape}
+            - Clinical Trials Summary: {clin_summary.development_landscape}
+            - Regulatory Summary: {reg_summary.approval_pathways}
             Based on these summaries, create a single, comprehensive analysis.
             """
             
             synthesis_result = await Runner.run(synthesis_agent, synthesis_input, context=context)
-            final_analysis = synthesis_result.final_output_as(ComprehensiveAnalysis)
+            return synthesis_result.final_output_as(ComprehensiveAnalysis).model_dump()
 
-            return {
-                "success": True,
-                "research_id": str(uuid.uuid4()),
-                "final_analysis": final_analysis.model_dump(),
-            }
-        
-        except InputGuardrailTripwireTriggered as e:
-            logger.warning(f"Input guardrail triggered: {e.output_info}")
-            raise HTTPException(status_code=400, detail=f"Query validation failed: {e.output_info}")
-        
         except HTTPException as http_exc:
-            # Re-raise HTTP exceptions to be sent to the client
             raise http_exc
-            
         except Exception as e:
-            # Catch any other unexpected errors during the workflow
-            logger.error(f"Comprehensive research workflow failed unexpectedly: {e}", exc_info=True)
+            logger.error(f"Comprehensive workflow failed unexpectedly: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
-            
+
 # --- FastAPI Application ---
-app = FastAPI(title="Medical Research Agent System", version="5.0.0")
+app = FastAPI(
+    title="Medical Research Agent System",
+    version="6.0.0",
+    description="A multi-agent system for pharmaceutical research with specialized and comprehensive endpoints."
+)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 orchestrator = MedicalResearchOrchestrator()
 
+# --- Endpoints ---
+
+@app.get("/", summary="Root Endpoint")
+async def root():
+    return {"message": "Welcome to the Medical Research Agent System v6.0.0"}
+
+@app.get("/health", summary="Health Check")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.post("/research/literature", response_model=LiteratureAnalysis, summary="Run Literature Review Agent")
+async def literature_review(request: LiteratureRequest):
+    """Conducts a targeted medical literature review using the Literature Specialist agent."""
+    context = ResearchContext(user_id="api", research_request=request.query, therapy_area="general")
+    try:
+        result = await Runner.run(literature_specialist, request.query, context=context)
+        return result.final_output_as(LiteratureAnalysis)
+    except Exception as e:
+        logger.error(f"Literature review endpoint failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/research/competitive", response_model=CompetitiveIntelligence, summary="Run Competitive Intelligence Agent")
+async def competitive_analysis(request: CompetitiveRequest):
+    """Conducts a competitive intelligence analysis using the Competitive Analyst agent."""
+    context = ResearchContext(user_id="api", research_request=request.query, therapy_area=request.therapy_area)
+    try:
+        result = await Runner.run(competitive_analyst, request.query, context=context)
+        return result.final_output_as(CompetitiveIntelligence)
+    except Exception as e:
+        logger.error(f"Competitive analysis endpoint failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/research/comprehensive", response_model=Dict, summary="Run Comprehensive Multi-Agent Workflow")
+async def comprehensive_research(request: ComprehensiveRequest):
+    """Conducts a comprehensive, multi-agent research task and returns a synthesized analysis."""
+    return await orchestrator.execute_comprehensive_research(query=request.query, therapy_area=request.therapy_area)
+
+# --- Scheduled Monitoring Task ---
+
 @app.on_event("startup")
-@repeat_every(seconds=60 * 60 * 24) # Run once every 24 hours
+@repeat_every(seconds=60 * 60 * 24) # Repeats once every 24 hours
 async def automated_therapy_area_monitoring() -> None:
-    """
-    Example of a scheduled background task for automated monitoring.
-    """
+    """A scheduled background task to automatically monitor key therapy areas."""
     logger.info("Running automated daily monitoring for key therapy areas...")
     monitored_areas = ["oncology", "neurology", "rare_disease"]
     for area in monitored_areas:
         query = f"latest significant developments in {area}"
         logger.info(f"Running comprehensive analysis for: {query}")
         try:
-            # You could store these results in your Pinecone DB or a database
+            # You could store these results in Pinecone or another database
             await orchestrator.execute_comprehensive_research(query=query, therapy_area=area)
         except Exception as e:
             logger.error(f"Automated monitoring for '{area}' failed: {e}")
-
-@app.post("/research/comprehensive", response_model=Dict)
-async def comprehensive_research(request: ComprehensiveRequest):
-    """Conduct comprehensive, multi-agent research and return a synthesized analysis."""
-    return await orchestrator.execute_comprehensive_research(query=request.query, therapy_area=request.therapy_area)
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "version": "5.0.0", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
     import uvicorn
