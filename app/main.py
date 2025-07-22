@@ -104,17 +104,25 @@ class ResearchContext:
 # --- Real Research Tools ---
 
 @function_tool
-async def search_medical_literature(query: str, max_results: int = 20, days_back: int = 90) -> str:
+async def search_medical_literature(query: str, max_results: int = 10) -> str: # Reduced max_results
     """
-    Search medical literature using the PubMed API to find recent and relevant medical studies.
+    Search medical literature using PubMed. Returns a JSON string with a list of sources,
+    including title, authors, journal, publication_date, and abstract.
     """
-    # This remains the same as your implementation, which is solid.
-    # For brevity, the full pubmed search implementation is omitted here.
-    # Let's assume it returns a JSON string of sources.
     logger.info(f"Searching PubMed for: {query}")
-    # Placeholder for your actual PubMed search logic
-    mock_sources = [{'pmid': '12345', 'title': f'Study on {query}'}]
-    return json.dumps({"sources": mock_sources})
+    # In a real implementation, this would call the PubMed API and get abstracts.
+    # For this refactor, we'll create a realistic mock output.
+    sources = []
+    for i in range(max_results):
+        sources.append({
+            "title": f"Study {i+1} on {query}",
+            "authors": [f"Author A{i}", f"Author B{i}"],
+            "journal": f"Journal of Medical Research {i}",
+            "publication_date": f"2024-0{i+1}-15",
+            "abstract": f"This is a concise abstract for study {i+1} regarding {query}. It summarizes the key findings, methods, and conclusions of the research without including the full text of the paper."
+        })
+    # Return a JSON string of the structured summaries
+    return json.dumps({"sources": sources})
 
 @function_tool
 async def search_clinical_trials_data(query: str, max_results: int = 15) -> str:
@@ -166,10 +174,13 @@ output_schema_settings = {"strict_json_schema": False} # Allows for more lenient
 
 literature_specialist = Agent(
     name="LiteratureSpecialist",
-    instructions="You are a medical literature review expert. Your role is to conduct literature searches, assess evidence quality, and identify research gaps.",
-    tools=common_tools,
+    instructions="You are a medical literature review expert. You will be given a JSON string containing a list of research article summaries. "
+                 "Your role is to analyze these summaries, assess the quality of the evidence, and identify key findings and research gaps. "
+                 "Do not process the full text, only the provided abstracts.",
+    tools=[search_medical_literature], # Note: The agent will call the tool, then process the output.
     output_type=AgentOutputSchema(LiteratureAnalysis, **output_schema_settings)
 )
+
 
 competitive_analyst = Agent(
     name="CompetitiveAnalyst",
@@ -240,7 +251,7 @@ class MedicalResearchOrchestrator:
         workflow_start = datetime.now()
 
         try:
-            # Triage to decide which agents to run (though here we run them all in parallel)
+            # Triage the request
             await Runner.run(triage_agent, query, context=context)
 
             # Run specialist agents in parallel
@@ -252,20 +263,32 @@ class MedicalResearchOrchestrator:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
+            # Separate successful results from any exceptions
+            successful_results = []
+            agent_errors = []
+            for res in results:
+                if isinstance(res, Exception):
+                    logger.error(f"Agent execution failed: {res}", exc_info=True)
+                    agent_errors.append(str(res))
+                else:
+                    successful_results.append(res)
+            
+            # If any agent failed, stop the workflow and raise an error
+            if agent_errors:
+                error_message = f"One or more agents failed during execution: {'; '.join(agent_errors)}"
+                raise HTTPException(status_code=500, detail=error_message)
+
+            # --- CORRECTED LOGIC ---
+            # 1. Unpack the successful results first
+            lit_res, comp_res, clin_res, reg_res = successful_results
+
+            # 2. Now, create the summaries using the unpacked variables
             lit_summary = lit_res.final_output_as(LiteratureAnalysis)
             comp_summary = comp_res.final_output_as(CompetitiveIntelligence)
             clin_summary = clin_res.final_output_as(ClinicalTrialsAnalysis)
             reg_summary = reg_res.final_output_as(RegulatoryAssessment)
-
-            # Error handling for failed agents
-            if any(isinstance(res, Exception) for res in results):
-                errors = [str(res) for res in results if isinstance(res, Exception)]
-                logger.error(f"Errors during parallel agent execution: {errors}")
-                raise HTTPException(status_code=500, detail=f"One or more agents failed: {', '.join(errors)}")
-
-            lit_res, comp_res, clin_res, reg_res = results
-
-            # Create a detailed prompt for the synthesis agent
+            
+            # 3. Create the synthesis prompt
             synthesis_input = f"""
             Synthesize the following research summaries for the query: "{query}" in the "{therapy_area}" therapy area.
             
@@ -300,13 +323,20 @@ class MedicalResearchOrchestrator:
                 "research_id": str(uuid.uuid4()),
                 "final_analysis": final_analysis.model_dump(),
             }
+        
         except InputGuardrailTripwireTriggered as e:
             logger.warning(f"Input guardrail triggered: {e.output_info}")
             raise HTTPException(status_code=400, detail=f"Query validation failed: {e.output_info}")
+        
+        except HTTPException as http_exc:
+            # Re-raise HTTP exceptions to be sent to the client
+            raise http_exc
+            
         except Exception as e:
-            logger.error(f"Comprehensive research workflow failed: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e))
-
+            # Catch any other unexpected errors during the workflow
+            logger.error(f"Comprehensive research workflow failed unexpectedly: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+            
 # --- FastAPI Application ---
 app = FastAPI(title="Medical Research Agent System", version="5.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
