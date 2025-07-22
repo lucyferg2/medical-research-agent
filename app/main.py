@@ -8,7 +8,7 @@ import logging
 import os
 import uuid
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union 
 
 import aiohttp
 from agents import Agent, Runner, FunctionTool, function_tool, GuardrailFunctionOutput, InputGuardrail, AgentOutputSchema
@@ -59,8 +59,7 @@ class CompetitiveIntelligence(BaseModel):
 
 class ClinicalTrialsAnalysis(BaseModel):
     development_landscape: str
-    # CHANGE THIS LINE:
-    phase_distribution: Dict[str, List[str]] # <-- From Dict[str, int] to Dict[str, List[str]]
+    phase_distribution: Dict[str, Union[List[str], int]] 
     key_sponsors: List[str]
     primary_endpoints: List[str]
     development_timelines: Dict[str, Any]
@@ -181,7 +180,10 @@ competitive_analyst = Agent(
 
 clinical_trials_expert = Agent(
     name="ClinicalTrialsExpert",
-    instructions="You are a clinical development expert. Your role is to analyze trial designs, regulatory pathways, and development timelines from clinical trial data.",
+    instructions="You are a clinical development expert. Your role is to analyze trial designs, regulatory pathways, and development timelines from clinical trial data. "
+                 "For the 'phase_distribution' field in your output, you MUST provide a dictionary where keys are the trial phases (e.g., 'Phase 1', 'Phase 2') "
+                 "and the values are a LIST of strings, with each string being a trial title or NCT ID. "
+                 "Example: {'Phase 2': ['NCT012345: A Study of Drug X', 'NCT67890: Another Study']}",
     tools=[search_clinical_trials_data, search_medical_literature],
     output_type=AgentOutputSchema(ClinicalTrialsAnalysis, **output_schema_settings)
 )
@@ -250,6 +252,11 @@ class MedicalResearchOrchestrator:
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
+            lit_summary = lit_res.final_output_as(LiteratureAnalysis)
+            comp_summary = comp_res.final_output_as(CompetitiveIntelligence)
+            clin_summary = clin_res.final_output_as(ClinicalTrialsAnalysis)
+            reg_summary = reg_res.final_output_as(RegulatoryAssessment)
+
             # Error handling for failed agents
             if any(isinstance(res, Exception) for res in results):
                 errors = [str(res) for res in results if isinstance(res, Exception)]
@@ -260,12 +267,29 @@ class MedicalResearchOrchestrator:
 
             # Create a detailed prompt for the synthesis agent
             synthesis_input = f"""
-            Synthesize the following research results for the query: "{query}" in the "{therapy_area}" therapy area.
-
-            Literature Analysis: {lit_res.final_output_as(LiteratureAnalysis).model_dump_json(indent=2)}
-            Competitive Analysis: {comp_res.final_output_as(CompetitiveIntelligence).model_dump_json(indent=2)}
-            Clinical Trials Analysis: {clin_res.final_output_as(ClinicalTrialsAnalysis).model_dump_json(indent=2)}
-            Regulatory Assessment: {reg_res.final_output_as(RegulatoryAssessment).model_dump_json(indent=2)}
+            Synthesize the following research summaries for the query: "{query}" in the "{therapy_area}" therapy area.
+            
+            **1. Literature Review Summary:**
+            - Executive Summary: {lit_summary.executive_summary}
+            - Key Findings: {'; '.join(lit_summary.key_findings)}
+            - Recommendations: {'; '.join(lit_summary.recommendations)}
+            
+            **2. Competitive Intelligence Summary:**
+            - Competitive Landscape: {comp_summary.competitive_landscape}
+            - Key Competitors: {', '.join(comp_summary.key_competitors)}
+            - Strategic Implications: {comp_summary.strategic_implications}
+            
+            **3. Clinical Trials Summary:**
+            - Development Landscape: {clin_summary.development_landscape}
+            - Key Sponsors: {', '.join(clin_summary.key_sponsors)}
+            - Strategic Recommendations: {'; '.join(clin_summary.strategic_recommendations)}
+            
+            **4. Regulatory Assessment Summary:**
+            - Approval Pathways: {reg_summary.approval_pathways}
+            - Regulatory Risks: {'; '.join(reg_summary.regulatory_risks)}
+            - Strategic Recommendations: {'; '.join(reg_summary.strategic_recommendations)}
+            
+            Based on these summaries, create a single, comprehensive analysis.
             """
             
             synthesis_result = await Runner.run(synthesis_agent, synthesis_input, context=context)
