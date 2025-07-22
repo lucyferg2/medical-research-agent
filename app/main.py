@@ -11,6 +11,7 @@ import aiohttp
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from enum import Enum
+from agents import AgentOrchestrator, AgentContext, TaskType, AgentRole
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +35,10 @@ app.add_middleware(
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 RESEARCH_EMAIL = os.getenv("RESEARCH_EMAIL", "research@company.com")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+
+# Initialize orchestrator
+agent_orchestrator = AgentOrchestrator(openai_client, research_tools)
+
 
 # Enhanced data models
 @dataclass
@@ -625,6 +630,30 @@ async def competitive_analysis(request: dict):
         "therapy_area": request.get("therapy_area", "general")
     }
     return await competitive_intelligence(enhanced_request)
+
+@app.post("/research/agent-workflow")
+async def agent_workflow_endpoint(request: dict):
+    """Multi-agent workflow with specialized expertise"""
+    try:
+        query = request.get("query")
+        therapy_area = request.get("therapy_area", "general")
+        analysis_type = request.get("analysis_type", "comprehensive_research")
+        
+        # Create agent context
+        context = AgentContext(
+            query=query,
+            therapy_area=therapy_area,
+            task_type=TaskType(analysis_type),
+            parameters=request
+        )
+        
+        # Execute multi-agent workflow
+        result = await agent_orchestrator.execute_workflow(context)
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
