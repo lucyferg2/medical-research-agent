@@ -13,8 +13,8 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 
-from agents import AgentOrchestrator, MedicalResearchTools
-from agents.medical_agents import AgentContext
+from medical_agents import AgentOrchestrator
+from research_tools import MedicalResearchTools
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
