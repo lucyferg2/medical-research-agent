@@ -134,12 +134,12 @@ class CompetitiveRequest(BaseModel):
 
 class ResearchTools:
     """Advanced research tools for data collection"""
-
+    
     def __init__(self, email: str):
         self.email = email
         self.pubmed_base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
         self.clinicaltrials_base_url = "https://clinicaltrials.gov/api/v2"
-
+    
     async def search_pubmed(self, query: str, max_results: int = 20, days_back: int = 90) -> List[ResearchSource]:
         """Search PubMed for recent medical literature"""
         try:
@@ -147,10 +147,10 @@ class ResearchTools:
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days_back)
             date_range = f"{start_date.strftime('%Y/%m/%d')}:{end_date.strftime('%Y/%m/%d')}"
-
+            
             # Enhanced search with filters
             enhanced_query = f"({query}) AND {date_range}[pdat] AND (clinical trial[ptyp] OR systematic review[ptyp])"
-
+            
             # Search for PMIDs
             search_url = f"{self.pubmed_base_url}/esearch.fcgi"
             params = {
@@ -162,7 +162,7 @@ class ResearchTools:
                 'tool': 'medical_research_agent',
                 'email': self.email
             }
-
+            
             async with aiohttp.ClientSession() as session:
                 try:
                     async with session.get(search_url, params=params, timeout=30) as response:
@@ -175,7 +175,7 @@ class ResearchTools:
                 except Exception as e:
                     logger.error(f"PubMed API error: {e}")
                     pmids = []
-
+            
             # Create structured sources from PMIDs
             sources = []
             for i, pmid in enumerate(pmids[:max_results]):
@@ -191,20 +191,20 @@ class ResearchTools:
                     relevance_score=9.5 - (i * 0.2)
                 )
                 sources.append(source)
-
+            
             return sources
-
+            
         except Exception as e:
             logger.error(f"PubMed search error: {e}")
             return self._generate_mock_sources(query, max_results)
-
+    
     async def search_clinical_trials(self, query: str, max_results: int = 10) -> List[Dict]:
         """Search clinical trials"""
         try:
             # Mock clinical trials data with realistic structure
             trials = []
             sponsors = ["Pfizer Inc.", "Novartis AG", "Roche Holding", "Bristol Myers Squibb", "Merck & Co."]
-
+            
             for i in range(max_results):
                 trial = {
                     'nct_id': f'NCT0{str(uuid.uuid4().int)[:7]}',
@@ -218,18 +218,18 @@ class ResearchTools:
                     'locations': f'{15 + i*5} sites globally'
                 }
                 trials.append(trial)
-
+            
             return trials
-
+            
         except Exception as e:
             logger.error(f"Clinical trials search error: {e}")
             return []
-
+    
     def _generate_mock_sources(self, query: str, count: int) -> List[ResearchSource]:
         """Generate realistic mock sources"""
         sources = []
         journals = ["Nature Medicine", "The Lancet", "NEJM", "Cell", "JCO"]
-
+        
         for i in range(count):
             source = ResearchSource(
                 source_id=f"PMID{35000000 + i}",
@@ -243,7 +243,7 @@ class ResearchTools:
                 relevance_score=9.0 - (i * 0.1)
             )
             sources.append(source)
-
+        
         return sources
 
 # Initialize research tools
@@ -257,18 +257,18 @@ research_tools = ResearchTools(os.getenv("RESEARCH_EMAIL", "research@company.com
 async def search_medical_literature(query: str, max_results: int = 20, days_back: int = 90) -> str:
     """
     Search medical literature using PubMed database.
-
+    
     Args:
         query: Research query or medical topic
         max_results: Maximum number of sources to retrieve
         days_back: Days back to search for recent publications
-
+    
     Returns:
         JSON string containing literature sources and metadata
     """
     try:
         sources = await research_tools.search_pubmed(query, max_results, days_back)
-
+        
         result = {
             'sources_found': len(sources),
             'query_used': query,
@@ -284,9 +284,9 @@ async def search_medical_literature(query: str, max_results: int = 20, days_back
                 for source in sources[:10]  # Top 10 for agent processing
             ]
         }
-
+        
         return json.dumps(result, indent=2)
-
+        
     except Exception as e:
         logger.error(f"Literature search tool error: {e}")
         return json.dumps({'error': str(e), 'sources_found': 0})
@@ -295,25 +295,25 @@ async def search_medical_literature(query: str, max_results: int = 20, days_back
 async def search_clinical_trials_data(query: str, max_results: int = 10) -> str:
     """
     Search clinical trials database for development programs.
-
+    
     Args:
         query: Query for clinical trials search
         max_results: Maximum number of trials to retrieve
-
+    
     Returns:
         JSON string containing clinical trials information
     """
     try:
         trials = await research_tools.search_clinical_trials(query, max_results)
-
+        
         result = {
             'trials_found': len(trials),
             'query_used': query,
             'trials': trials
         }
-
+        
         return json.dumps(result, indent=2)
-
+        
     except Exception as e:
         logger.error(f"Clinical trials search tool error: {e}")
         return json.dumps({'error': str(e), 'trials_found': 0})
@@ -322,11 +322,11 @@ async def search_clinical_trials_data(query: str, max_results: int = 10) -> str:
 async def search_vector_database(query: str, top_k: int = 5) -> str:
     """
     Search vector database for similar previous research.
-
+    
     Args:
         query: Search query for similar research
         top_k: Number of similar results to return
-
+    
     Returns:
         JSON string containing similar research results
     """
@@ -342,15 +342,15 @@ async def search_vector_database(query: str, top_k: int = 5) -> str:
                 'timestamp': datetime.now().isoformat(),
                 'key_findings': [f'Finding {i+1} from similar research', f'Related insight {i+1}']
             })
-
+        
         result = {
             'similar_research_found': len(similar_results),
             'query_used': query,
             'results': similar_results
         }
-
+        
         return json.dumps(result, indent=2)
-
+        
     except Exception as e:
         logger.error(f"Vector search tool error: {e}")
         return json.dumps({'error': str(e), 'similar_research_found': 0})
@@ -370,7 +370,7 @@ literature_specialist = Agent[ResearchContext](
     - Assess evidence quality and clinical significance
     - Identify research gaps and future directions
     - Provide evidence-graded recommendations
-
+    
     Always use the search_medical_literature tool to gather current publications. Focus on clinical 
     relevance, statistical significance, and practical implications for patient care.""",
     tools=[search_medical_literature, search_vector_database],
@@ -379,7 +379,7 @@ literature_specialist = Agent[ResearchContext](
 
 # Competitive Intelligence Agent
 competitive_analyst = Agent[ResearchContext](
-    name="Competitive Analyst",
+    name="Competitive Analyst", 
     instructions="""You are a pharmaceutical competitive intelligence specialist with expertise in 
     market dynamics, competitive positioning, and strategic business intelligence.
 
@@ -388,7 +388,7 @@ competitive_analyst = Agent[ResearchContext](
     - Identify key competitors and their strategies
     - Assess pipeline intelligence and development timelines
     - Provide strategic recommendations for market entry/expansion
-
+    
     Use both literature and clinical trials tools to gather comprehensive competitive data. Focus on 
     actionable business intelligence for pharmaceutical strategy teams.""",
     tools=[search_medical_literature, search_clinical_trials_data, search_vector_database],
@@ -406,7 +406,7 @@ clinical_trials_expert = Agent[ResearchContext](
     - Assess development timelines and regulatory pathways
     - Evaluate primary endpoints and success factors
     - Provide clinical development strategy recommendations
-
+    
     Focus on practical development insights, regulatory considerations, and strategic planning for 
     clinical programs.""",
     tools=[search_clinical_trials_data, search_medical_literature],
@@ -424,7 +424,7 @@ regulatory_specialist = Agent[ResearchContext](
     - Assess regulatory precedents and guidance landscape
     - Evaluate approval timelines and requirements
     - Identify regulatory risks and mitigation strategies
-
+    
     Focus on regulatory strategy, compliance requirements, and approval optimization for pharmaceutical 
     development programs.""",
     tools=[search_medical_literature, search_vector_database],
@@ -441,13 +441,13 @@ triage_agent = Agent[ResearchContext](
     - What type of analysis is most appropriate
     - Which specialized agents should be involved
     - The priority and complexity level of the request
-
+    
     Available specialist agents:
     - Literature Specialist: For evidence-based literature analysis
     - Competitive Analyst: For market and competitive intelligence  
     - Clinical Trials Expert: For clinical development landscape
     - Regulatory Specialist: For regulatory pathway analysis
-
+    
     Route complex queries to multiple specialists. For comprehensive research, involve all relevant agents.""",
     handoffs=[literature_specialist, competitive_analyst, clinical_trials_expert, regulatory_specialist]
 )
@@ -463,7 +463,7 @@ synthesis_agent = Agent[ResearchContext](
     - Identify key themes, contradictions, and synergies
     - Provide executive-level summaries and recommendations
     - Generate actionable next steps for decision-makers
-
+    
     Create comprehensive, cohesive insights that support strategic pharmaceutical decision-making.""",
     tools=[search_vector_database],
     output_type=ComprehensiveAnalysis
@@ -491,7 +491,7 @@ async def medical_query_guardrail(ctx, agent, input_data: str) -> GuardrailFunct
     try:
         result = await Runner.run(validation_agent, input_data, context=ctx.context)
         validation = result.final_output_as(QueryValidation)
-
+        
         return GuardrailFunctionOutput(
             output_info=validation,
             tripwire_triggered=not (validation.is_medical_query and validation.is_appropriate)
@@ -518,11 +518,11 @@ triage_agent_with_guardrails = Agent[ResearchContext](
 
 class MedicalResearchOrchestrator:
     """Orchestrator for medical research workflows using real OpenAI Agents SDK"""
-
+    
     def __init__(self):
         self.triage_agent = triage_agent_with_guardrails
         self.synthesis_agent = synthesis_agent
-
+    
     async def execute_literature_review(self, query: str, therapy_area: str, max_results: int = 20, days_back: int = 90) -> Dict:
         """Execute focused literature review"""
         try:
@@ -532,10 +532,10 @@ class MedicalResearchOrchestrator:
                 therapy_area=therapy_area,
                 parameters={'max_results': max_results, 'days_back': days_back}
             )
-
+            
             result = await Runner.run(literature_specialist, query, context=context)
             analysis = result.final_output_as(LiteratureAnalysis)
-
+            
             return {
                 'success': True,
                 'research_id': str(uuid.uuid4()),
@@ -546,11 +546,11 @@ class MedicalResearchOrchestrator:
                 'agent_used': 'literature_specialist',
                 'timestamp': datetime.now().isoformat()
             }
-
+            
         except Exception as e:
             logger.error(f"Literature review error: {e}")
             raise HTTPException(status_code=500, detail=f"Literature review failed: {str(e)}")
-
+    
     async def execute_competitive_analysis(self, query: str, therapy_area: str, include_trials: bool = True) -> Dict:
         """Execute competitive intelligence analysis"""
         try:
@@ -560,10 +560,10 @@ class MedicalResearchOrchestrator:
                 therapy_area=therapy_area,
                 parameters={'include_trials': include_trials}
             )
-
+            
             result = await Runner.run(competitive_analyst, query, context=context)
             analysis = result.final_output_as(CompetitiveIntelligence)
-
+            
             return {
                 'success': True,
                 'research_id': str(uuid.uuid4()),
@@ -574,11 +574,11 @@ class MedicalResearchOrchestrator:
                 'agent_used': 'competitive_analyst',
                 'timestamp': datetime.now().isoformat()
             }
-
+            
         except Exception as e:
             logger.error(f"Competitive analysis error: {e}")
             raise HTTPException(status_code=500, detail=f"Competitive analysis failed: {str(e)}")
-
+    
     async def execute_comprehensive_research(self, query: str, therapy_area: str, **kwargs) -> Dict:
         """Execute comprehensive multi-agent research workflow"""
         try:
@@ -598,14 +598,20 @@ class MedicalResearchOrchestrator:
             # In a full implementation, you'd parse the triage result and route accordingly
 
             # Execute multiple agents in parallel
-            literature_task = Runner.run(literature_specialist, query, context=context)
-            competitive_task = Runner.run(competitive_analyst, query, context=context)
-            clinical_task = Runner.run(clinical_trials_expert, query, context=context)
+            tasks = [
+                Runner.run(literature_specialist, query, context=context),
+                Runner.run(competitive_analyst, query, context=context),
+                Runner.run(clinical_trials_expert, query, context=context),
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Gather results
-            literature_result = await literature_task
-            competitive_result = await competitive_task
-            clinical_result = await clinical_task
+            # Check for errors in the results
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Error during parallel agent execution: {result}")
+                    raise HTTPException(status_code=500, detail=f"An agent failed during execution: {result}")
+
+            literature_result, competitive_result, clinical_result = results
 
             # Step 3: Synthesis
             synthesis_input = f"""
@@ -650,6 +656,7 @@ class MedicalResearchOrchestrator:
         except Exception as e:
             logger.error(f"Comprehensive research error: {e}")
             raise HTTPException(status_code=500, detail=f"Comprehensive research failed: {str(e)}")
+
 
 # ================================
 # FASTAPI APPLICATION
@@ -754,7 +761,7 @@ async def comprehensive_research(request: dict):
     query = request.get("query")
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
-
+    
     return await orchestrator.execute_comprehensive_research(
         query,
         request.get("therapy_area", "general"),
