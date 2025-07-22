@@ -2,10 +2,11 @@ services:
   - type: web
     name: medical-research-agent-enhanced
     env: python
-    plan: starter  # Can upgrade to standard for better performance
+    plan: starter
+    runtime: python-3.11  # Use Python 3.11 instead of 3.13 for better compatibility
     buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
+      python -m pip install --upgrade pip setuptools wheel
+      pip install --no-cache-dir -r requirements.txt
     startCommand: python main.py
     envVars:
       - key: OPENAI_API_KEY
@@ -22,4 +23,6 @@ services:
         value: false
       - key: LOG_LEVEL
         value: INFO
+      - key: PYTHON_VERSION
+        value: 3.11.0
     healthCheckPath: /health
