@@ -29,22 +29,23 @@ class SimplePineconeClient:
         self._initialize()
     
     def _initialize(self):
-        """Initialize Pinecone connection settings"""
+        """Initialize Pinecone connection settings."""
         try:
             self.api_key = os.getenv("PINECONE_API_KEY")
+            self.project_id = os.getenv("PINECONE_PROJECT_ID")
             self.environment = os.getenv("PINECONE_ENVIRONMENT")
             self.index_name = os.getenv("PINECONE_INDEX_NAME")
-            
-            if not all([self.api_key, self.environment, self.index_name]):
-                logger.warning("Pinecone API key, environment, or index name not provided. Vector storage will be disabled.")
+
+            if not all([self.api_key, self.project_id, self.environment, self.index_name]):
+                logger.warning("One or more Pinecone environment variables are missing. Vector storage will be disabled.")
                 return
-            
-            # Construct base URL for Pinecone API
-            self.base_url = f"https://{self.index_name}-{self.environment}.svc.pinecone.io"
+
+            # This line builds the final URL from your .env variables
+            self.base_url = f"https://{self.index_name}-{self.project_id}.svc.{self.environment}.pinecone.io"
             self.available = True
-            
-            logger.info("Simple Pinecone client initialized successfully")
-            
+
+            logger.info(f"Simple Pinecone client initialized successfully for URL: {self.base_url}")
+
         except Exception as e:
             logger.error(f"Error initializing Pinecone client: {e}")
             self.available = False
