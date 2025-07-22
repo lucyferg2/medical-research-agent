@@ -12,6 +12,8 @@ from typing import Dict, List, Any
 
 import aiohttp
 from agents import Agent, Runner, FunctionTool, function_tool, GuardrailFunctionOutput, InputGuardrail, AgentOutputSchema
+from agents.exceptions import InputGuardrailTripwireTriggered, ModelBehaviorError 
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -57,7 +59,8 @@ class CompetitiveIntelligence(BaseModel):
 
 class ClinicalTrialsAnalysis(BaseModel):
     development_landscape: str
-    phase_distribution: Dict[str, int]
+    # CHANGE THIS LINE:
+    phase_distribution: Dict[str, List[str]] # <-- From Dict[str, int] to Dict[str, List[str]]
     key_sponsors: List[str]
     primary_endpoints: List[str]
     development_timelines: Dict[str, Any]
@@ -192,8 +195,9 @@ regulatory_specialist = Agent(
 
 synthesis_agent = Agent(
     name="ResearchSynthesisAgent",
-    instructions="You are a research synthesis expert. Your role is to integrate findings from multiple specialist analyses to create comprehensive, actionable intelligence.",
-    tools=[], # This agent only synthesizes, it doesn't call tools
+    instructions="You are a research synthesis expert. Your role is to integrate findings from multiple specialist analyses to create comprehensive, actionable intelligence. "
+                 "For the 'risk_assessment' field, create a dictionary where keys are risk categories (e.g., 'Regulatory Risk', 'Market Risk') and values are their detailed descriptions.",
+    tools=[],
     output_type=AgentOutputSchema(ComprehensiveAnalysis, **output_schema_settings)
 )
 
