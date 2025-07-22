@@ -60,6 +60,7 @@ openpyxl
 python-docx
 jinja2
 email-validator
+lxml
 
 # Rate limiting and caching
 slowapi
