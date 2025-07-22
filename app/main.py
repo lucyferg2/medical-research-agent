@@ -83,7 +83,7 @@ class CompetitiveIntelligence(BaseModel):
 
 class ClinicalTrialsAnalysis(BaseModel):
     development_landscape: str
-    phase_distribution: Dict[str, str]
+    phase_distribution: Dict[str, int]  # <<< THIS IS THE FIX
     key_sponsors: List[str]
     primary_endpoints: List[str]
     development_timelines: Dict[str, str]
@@ -350,16 +350,16 @@ class MedicalResearchOrchestrator:
 # ================================
 
 orchestrator = MedicalResearchOrchestrator()
-app = FastAPI(title="Medical Research Agent System", version="4.1.0")
+app = FastAPI(title="Medical Research Agent System", version="4.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/")
 async def root():
-    return {"message": "Medical Research Agent System v4.1.0"}
+    return {"message": "Medical Research Agent System v4.2.0"}
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "4.1.0", "timestamp": datetime.now().isoformat()}
+    return {"status": "healthy", "version": "4.2.0", "timestamp": datetime.now().isoformat()}
 
 @app.post("/research/comprehensive")
 async def comprehensive_research(request: ComprehensiveRequest):
