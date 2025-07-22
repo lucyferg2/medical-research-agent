@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_snake
 
-from agents import Agent, Runner, FunctionTool, function_tool
+from agents import Agent, Runner, FunctionTool, function_tool, AgentOutputSchema
 from agents.exceptions import InputGuardrailTripwireTriggered
 from app.utils.vector_store import SimplePineconeClient
 from fastapi_utilities import repeat_every
