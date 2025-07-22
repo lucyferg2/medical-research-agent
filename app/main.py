@@ -11,7 +11,7 @@ import aiohttp
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from enum import Enum
-from agents import AgentOrchestrator, AgentContext, TaskType, AgentRole
+from app.agents import AgentOrchestrator, AgentContext, TaskType, AgentRole
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
