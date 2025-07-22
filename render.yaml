@@ -60,5 +60,4 @@ services:
       - render.yaml
       ignoredPaths:
       - README.md
-      - test_*.py
       - docs/
