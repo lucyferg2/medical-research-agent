@@ -22,6 +22,8 @@ from app.utils.vector_store import SimplePineconeClient
 # For background tasks
 from fastapi_utilities import repeat_every
 
+from dataclasses import dataclass, field
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -89,12 +91,13 @@ class ComprehensiveRequest(BaseModel):
 # --- Agent Context ---
 @dataclass
 class ResearchContext:
+    """Context passed between agents"""
     user_id: str
     research_request: str
     therapy_area: str
     parameters: Dict[str, Any]
-    previous_findings: Dict[str, Any] = None
-    vector_store_results: List[Dict] = None
+    previous_findings: Dict[str, Any] = field(default_factory=dict)
+    vector_store_results: List[Dict] = field(default_factory=list)
 
 # --- Real Research Tools ---
 
