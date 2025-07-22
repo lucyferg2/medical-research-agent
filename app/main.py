@@ -225,7 +225,7 @@ class CompetitiveRequest(BaseModel):
 class ComprehensiveRequest(BaseModel):
     query: str = Field(..., min_length=5, max_length=500, description="Research query")
     therapy_area: TherapyArea = Field(TherapyArea.GENERAL, description="Therapy area")
-    priority_level: str = Field("normal", regex="^(low|normal|high|urgent)$")
+    priority_level: str = Field("normal", pattern="^(low|normal|high|urgent)$")
     include_regulatory: bool = Field(True, description="Include regulatory analysis")
     include_competitive: bool = Field(True, description="Include competitive intelligence")
 
