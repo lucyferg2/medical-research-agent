@@ -1,28 +1,64 @@
 services:
   - type: web
-    name: medical-research-agent-enhanced
+    name: medical-research-agent-v9
     env: python
     plan: starter
-    runtime: python-3.11  # Use Python 3.11 instead of 3.13 for better compatibility
+    runtime: python-3.11
     buildCommand: |
-      python -m pip install --upgrade pip setuptools wheel
+      python -m pip install --upgrade pip
       pip install --no-cache-dir -r requirements.txt
     startCommand: python main.py
+    healthCheckPath: /health
+    
+    # Environment Variables
     envVars:
+      # Required Variables
       - key: OPENAI_API_KEY
-        sync: false
+        sync: false  # Set manually in Render dashboard
       - key: RESEARCH_EMAIL
-        sync: false
+        sync: false  # Set manually in Render dashboard
+      
+      # Optional Pinecone Configuration
       - key: PINECONE_API_KEY
-        sync: false
+        sync: false  # Set manually if using vector storage
+      - key: PINECONE_PROJECT_ID
+        sync: false  # Set manually if using vector storage
       - key: PINECONE_ENVIRONMENT
         value: gcp-starter
       - key: PINECONE_INDEX_NAME
         value: medical-research
+      
+      # System Configuration
+      - key: PORT
+        value: 10000  # Render default port
       - key: DEBUG
         value: false
       - key: LOG_LEVEL
         value: INFO
       - key: PYTHON_VERSION
         value: 3.11.0
-    healthCheckPath: /health
+      
+      # Performance Tuning
+      - key: WORKERS
+        value: 1
+      - key: TIMEOUT
+        value: 120
+      - key: KEEP_ALIVE
+        value: 5
+      
+    # Resource Configuration
+    region: oregon
+    
+    # Auto-deploy from main branch
+    autoDeploy: true
+    
+    # Build settings
+    buildFilter:
+      paths:
+      - main.py
+      - requirements.txt
+      - render.yaml
+      ignoredPaths:
+      - README.md
+      - test_*.py
+      - docs/
