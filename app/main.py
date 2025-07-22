@@ -11,7 +11,10 @@ import aiohttp
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from enum import Enum
-from app.agents import AgentOrchestrator, AgentContext, TaskType, AgentRole
+
+
+from agents import AgentOrchestrator, MedicalResearchTools
+from agents.medical_agents import AgentContext
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +40,9 @@ RESEARCH_EMAIL = os.getenv("RESEARCH_EMAIL", "research@company.com")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 
 # Initialize orchestrator
+research_tools = MedicalResearchTools(RESEARCH_EMAIL)
 agent_orchestrator = AgentOrchestrator(openai_client, research_tools)
+
 
 
 # Enhanced data models
@@ -497,7 +502,8 @@ async def root():
             "health": "/health",
             "literature": "/research/literature",
             "competitive": "/research/competitive",
-            "comprehensive": "/research/comprehensive"
+            "comprehensive": "/research/comprehensive",
+            "agent_workflow": "/research/agent-workflow"
         }
     }
 
@@ -512,6 +518,10 @@ async def health_check():
             "async_processing": True,
             "advanced_parsing": True,
             "competitive_intelligence": True
+        },
+        "imports": {
+            "agents_package": "✅ imported successfully",
+            "research_tools": "✅ imported successfully"
         }
     }
 
@@ -633,27 +643,36 @@ async def competitive_analysis(request: dict):
 
 @app.post("/research/agent-workflow")
 async def agent_workflow_endpoint(request: dict):
-    """Multi-agent workflow with specialized expertise"""
+    """Multi-agent workflow with proper imports"""
     try:
         query = request.get("query")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+        
         therapy_area = request.get("therapy_area", "general")
-        analysis_type = request.get("analysis_type", "comprehensive_research")
         
         # Create agent context
         context = AgentContext(
             query=query,
             therapy_area=therapy_area,
-            task_type=TaskType(analysis_type),
             parameters=request
         )
         
-        # Execute multi-agent workflow
+        # Execute workflow using imported orchestrator
         result = await agent_orchestrator.execute_workflow(context)
         
-        return result
+        return {
+            "success": True,
+            "research_id": str(uuid.uuid4()),
+            "workflow_result": result,
+            "architecture": "multi_file_imports",
+            "timestamp": datetime.now().isoformat()
+        }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Agent workflow error: {e}")
+        raise HTTPException(status_code=500, detail=f"Workflow failed: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn
