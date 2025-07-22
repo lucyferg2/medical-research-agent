@@ -1,11 +1,25 @@
 services:
   - type: web
-    name: medical-research-agent
+    name: medical-research-agent-enhanced
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: starter  # Can upgrade to standard for better performance
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: python main.py
     envVars:
       - key: OPENAI_API_KEY
         sync: false
       - key: RESEARCH_EMAIL
         sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: PINECONE_ENVIRONMENT
+        value: gcp-starter
+      - key: PINECONE_INDEX_NAME
+        value: medical-research
+      - key: DEBUG
+        value: false
+      - key: LOG_LEVEL
+        value: INFO
+    healthCheckPath: /health
