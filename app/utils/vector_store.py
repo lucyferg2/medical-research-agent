@@ -9,6 +9,7 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 import asyncio
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +31,12 @@ class SimplePineconeClient:
     def _initialize(self):
         """Initialize Pinecone connection settings"""
         try:
-            import os
-            
             self.api_key = os.getenv("PINECONE_API_KEY")
-            self.environment = os.getenv("PINECONE_ENVIRONMENT", "gcp-starter")
-            self.index_name = os.getenv("PINECONE_INDEX_NAME", "medical-research")
+            self.environment = os.getenv("PINECONE_ENVIRONMENT")
+            self.index_name = os.getenv("PINECONE_INDEX_NAME")
             
-            if not self.api_key:
-                logger.warning("Pinecone API key not provided. Vector storage will be disabled.")
+            if not all([self.api_key, self.environment, self.index_name]):
+                logger.warning("Pinecone API key, environment, or index name not provided. Vector storage will be disabled.")
                 return
             
             # Construct base URL for Pinecone API
@@ -48,6 +47,7 @@ class SimplePineconeClient:
             
         except Exception as e:
             logger.error(f"Error initializing Pinecone client: {e}")
+            self.available = False
     
     async def _make_request(self, method: str, endpoint: str, data: Dict = None) -> Dict:
         """Make HTTP request to Pinecone API"""
@@ -242,64 +242,3 @@ class PineconeManager:
 
 # Initialize global vector store instance
 vector_store = PineconeManager()
-
-# Mock vector store for when Pinecone is not available
-class MockVectorStore:
-    """Mock vector store for development/testing when Pinecone is not available"""
-    
-    def __init__(self):
-        self.storage = {}  # In-memory storage for testing
-        self.available = True
-    
-    async def initialize_index(self, dimension: int = 1536):
-        """Mock index initialization"""
-        logger.info("Mock vector store initialized")
-        return True
-    
-    def generate_id(self, content: str) -> str:
-        """Generate unique ID"""
-        return hashlib.md5(content.encode()).hexdigest()
-    
-    async def store_research(self, research_data: Dict[str, Any], 
-                           embedding: Optional[List[float]] = None) -> bool:
-        """Mock storage"""
-        research_id = self.generate_id(research_data['query'])
-        self.storage[research_id] = {
-            'data': research_data,
-            'embedding': embedding
-        }
-        logger.info(f"Research stored in mock vector store with ID: {research_id}")
-        return True
-    
-    async def search_similar(self, query_embedding: List[float], 
-                           top_k: int = 5) -> List[Dict]:
-        """Mock similarity search"""
-        # Return mock similar results
-        mock_matches = []
-        for i, (research_id, stored_data) in enumerate(list(self.storage.items())[:top_k]):
-            mock_matches.append({
-                'id': research_id,
-                'score': 0.9 - (i * 0.1),  # Mock decreasing similarity scores
-                'metadata': {
-                    'query': stored_data['data'].get('query', ''),
-                    'therapy_area': stored_data['data'].get('therapy_area', ''),
-                    'timestamp': stored_data['data'].get('timestamp', '')
-                }
-            })
-        return mock_matches
-    
-    def get_status(self) -> Dict[str, Any]:
-        """Get mock status"""
-        return {
-            'available': True,
-            'index_name': 'mock-index',
-            'environment': 'mock',
-            'stored_items': len(self.storage),
-            'client_type': 'mock_vector_store'
-        }
-
-# If Pinecone is not available, use mock store
-if not vector_store.available:
-    logger.warning("Pinecone not available. Using mock vector store for development.")
-    # Uncomment the line below if you want to use mock storage for testing
-    # vector_store = MockVectorStore()
