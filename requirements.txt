@@ -1,19 +1,70 @@
+# Enhanced Medical Research Agent System Requirements
+# Core FastAPI and web framework
 fastapi
-uvicorn
-openai
-requests
-aiohttp
-pydantic
+uvicorn[standard]
 python-multipart
-python-dotenv
-asyncio-mqtt
-numpy
+
+# OpenAI and AI libraries
+openai
+aiohttp
+httpx
+
+# Data processing and validation
+pydantic
 pandas
+numpy
+
+# Environment and configuration
+python-dotenv
+pydantic-settings
+
+# Vector database and embeddings
+pinecone
+sentence-transformers
+
+# Background tasks and scheduling
+celery[redis]
+redis
+apscheduler
+
+# Monitoring and logging
+prometheus-client
+structlog
+
+# Security and authentication
 python-jose[cryptography]
 passlib[bcrypt]
-email-validator
+python-multipart
+
+# HTTP clients and utilities
+requests
+aiofiles
+
+# Medical and scientific data processing
+biopython
+pubmed-parser
+xmltodict
+
+# Development and testing
+pytest
+pytest-asyncio
+black
+isort
+
+# Documentation
+fastapi[all]
+
+# Additional utilities for pharmaceutical workflows
+xlsxwriter
+openpyxl
+python-docx
 jinja2
-pinecone
-openai-agents
-fastapi-utilities
-apscheduler
+email-validator
+
+# Rate limiting and caching
+slowapi
+redis
+
+# Async support
+asyncio-mqtt
+aioredis
