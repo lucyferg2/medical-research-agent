@@ -16,11 +16,12 @@ class VectorSearchAgent {
     }
 
     try {
-      // Use the newer Pinecone SDK initialization (no environment needed)
+      // Initialize Pinecone client (matches Python v7+ pattern)
       this.pinecone = new Pinecone({
         apiKey: process.env.PINECONE_API_KEY
       });
       
+      // Get index reference (matches Python: pc.Index("index-name"))
       this.index = this.pinecone.index('attruby-claims');
       console.log('Pinecone initialized successfully for medical research');
       
@@ -36,10 +37,24 @@ class VectorSearchAgent {
 
   async testConnection() {
     try {
-      // Test with a simple query to verify connection
-      const testQuery = await this.index.describeIndexStats();
-      console.log('Pinecone connection verified. Index contains:', testQuery.totalVectorCount, 'vectors');
-      console.log('Index dimension:', testQuery.dimension);
+      // Test connection and get index stats
+      const indexStats = await this.index.describeIndexStats();
+      
+      console.log('Pinecone connection verified.');
+      console.log('Index stats:', {
+        totalVectorCount: indexStats.totalVectorCount || indexStats.total_vector_count || 'unknown',
+        dimension: indexStats.dimension,
+        indexFullness: indexStats.indexFullness,
+        namespaces: indexStats.namespaces ? Object.keys(indexStats.namespaces) : 'none'
+      });
+      
+      // Check if our namespace exists
+      if (indexStats.namespaces && indexStats.namespaces['Test Deck']) {
+        console.log('Test Deck namespace found with', indexStats.namespaces['Test Deck'].vectorCount, 'vectors');
+      } else {
+        console.log('Available namespaces:', Object.keys(indexStats.namespaces || {}));
+      }
+      
     } catch (error) {
       console.error('Pinecone connection test failed:', error);
       throw error;
@@ -72,56 +87,98 @@ class VectorSearchAgent {
       
       console.log('Generated embedding:', {
         length: embedding.length,
-        firstFew: embedding.slice(0, 3),
-        lastFew: embedding.slice(-3)
+        dimension: embedding.length,
+        sample: embedding.slice(0, 3)
       });
 
-      // Use the newer Pinecone SDK format (v2.0+)
-      console.log('Attempting Pinecone query with SDK v2.0+ format');
+      // Based on Pinecone v7+ API and your Python code pattern
+      console.log('Querying Pinecone with v7+ API format');
       
-      const queryRequest = {
+      // Your Python code uses:
+      // results = index.query(
+      //     namespace="",
+      //     vector=embedding, 
+      //     top_k=query_data.top_k,
+      //     include_metadata=True
+      // )
+      
+      const queryOptions = {
         vector: embedding,
         topK: topK,
         includeMetadata: includeMetadata
       };
 
-      // Only add namespace if it's provided and not empty
-      if (namespace && namespace.trim() !== '') {
-        queryRequest.namespace = namespace;
-        console.log('Using namespace:', namespace);
+      // Handle namespace - your Python uses empty string ""
+      if (namespace === 'Test Deck') {
+        queryOptions.namespace = 'Test Deck';
+        console.log('Using Test Deck namespace');
+      } else if (namespace === '' || !namespace) {
+        queryOptions.namespace = '';
+        console.log('Using empty namespace (matching Python pattern)');
       } else {
-        console.log('Using default namespace (no namespace specified)');
+        queryOptions.namespace = namespace;
+        console.log('Using custom namespace:', namespace);
       }
 
-      console.log('Query request structure:', {
-        hasVector: !!queryRequest.vector,
-        vectorLength: queryRequest.vector?.length,
-        topK: queryRequest.topK,
-        includeMetadata: queryRequest.includeMetadata,
-        namespace: queryRequest.namespace || 'default'
+      console.log('Query options:', {
+        hasVector: !!queryOptions.vector,
+        vectorDimension: queryOptions.vector.length,
+        topK: queryOptions.topK,
+        includeMetadata: queryOptions.includeMetadata,
+        namespace: queryOptions.namespace
       });
 
-      const queryResponse = await this.index.query(queryRequest);
+      // Execute query
+      const queryResponse = await this.index.query(queryOptions);
       
-      console.log('Pinecone query successful. Found', queryResponse.matches?.length || 0, 'matches');
+      console.log('Pinecone query successful:', {
+        matchCount: queryResponse.matches?.length || 0,
+        hasUsage: !!queryResponse.usage,
+        namespace: queryOptions.namespace
+      });
       
       if (queryResponse.matches && queryResponse.matches.length > 0) {
-        console.log('First match:', {
-          id: queryResponse.matches[0].id,
-          score: queryResponse.matches[0].score,
-          hasMetadata: !!queryResponse.matches[0].metadata
+        const firstMatch = queryResponse.matches[0];
+        console.log('Top result preview:', {
+          id: firstMatch.id,
+          score: Math.round(firstMatch.score * 1000) / 1000,
+          hasMetadata: !!firstMatch.metadata,
+          metadataKeys: firstMatch.metadata ? Object.keys(firstMatch.metadata).slice(0, 5) : []
         });
       }
       
       return queryResponse;
       
     } catch (error) {
-      console.error('Pinecone query error:', error);
-      console.error('Error name:', error.name);
-      console.error('Error message:', error.message);
-      if (error.cause) {
-        console.error('Error cause:', error.cause);
+      console.error('Pinecone query failed:', error);
+      
+      // Enhanced error logging for debugging
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        status: error.status,
+        body: error.body
+      });
+      
+      // Try alternative query format if the first one fails
+      if (error.message.includes('additional properties') || error.message.includes('validation')) {
+        console.log('Trying alternative query format...');
+        try {
+          const embedding = await this.generateEmbedding(query);
+          
+          // Minimal query format
+          const altQueryResponse = await this.index.query({
+            vector: embedding,
+            topK: topK
+          });
+          
+          console.log('Alternative query format successful');
+          return altQueryResponse;
+        } catch (altError) {
+          console.error('Alternative query also failed:', altError.message);
+        }
       }
+      
       throw error;
     }
   }
@@ -131,7 +188,7 @@ class VectorSearchAgent {
       const OpenAI = require('openai');
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       
-      console.log('Generating embedding for text:', text.substring(0, 100) + '...');
+      console.log('Generating embedding for:', text.substring(0, 50) + '...');
       
       const response = await openai.embeddings.create({
         model: 'text-embedding-3-small',
@@ -140,7 +197,16 @@ class VectorSearchAgent {
       });
 
       const embedding = response.data[0].embedding;
-      console.log('Embedding generated successfully. Length:', embedding.length);
+      
+      // Validate embedding dimension matches index
+      if (embedding.length !== 1536) {
+        throw new Error(`Embedding dimension mismatch: got ${embedding.length}, expected 1536`);
+      }
+      
+      console.log('Embedding generated successfully:', {
+        dimension: embedding.length,
+        model: 'text-embedding-3-small'
+      });
       
       return embedding;
     } catch (error) {
@@ -154,9 +220,7 @@ class VectorSearchAgent {
     
     console.log('Formatting results:', {
       matchCount: matches.length,
-      firstMatchId: matches[0]?.id,
-      firstMatchScore: matches[0]?.score,
-      hasMetadata: !!matches[0]?.metadata
+      hasUsage: !!queryResponse.usage
     });
     
     const formattedResults = {
@@ -165,18 +229,21 @@ class VectorSearchAgent {
       keyTerms: this.extractKeyTerms(originalQuery),
       relevantDocuments: matches.map((match, index) => ({
         id: match.id,
-        score: Math.round(match.score * 1000) / 1000, // Round to 3 decimal places
+        score: Math.round(match.score * 1000) / 1000,
         rank: index + 1,
         title: match.metadata?.title || 'Unknown Title',
         authors: match.metadata?.authors || 'Unknown Authors',
         citation: match.metadata?.citation || this.buildCitation(match.metadata),
-        chunk_preview: match.metadata?.chunk_preview || match.metadata?.document?.substring(0, 200) + '...',
+        chunk_preview: match.metadata?.chunk_preview || 
+                      match.metadata?.document?.substring(0, 300) + '...' ||
+                      'Preview not available',
         doi: match.metadata?.doi || null,
         journal: match.metadata?.journal || null,
         published: match.metadata?.published || null,
         page_reference: match.metadata?.page_reference || null,
         citation_count: match.metadata?.citation_count || null,
-        source_file: match.metadata?.source_file || null
+        source_file: match.metadata?.source_file || null,
+        chunk_index: match.metadata?.chunk_index || null
       })),
       knowledgeGaps: this.identifyKnowledgeGaps(matches, originalQuery),
       searchStrategy: 'semantic_similarity',
@@ -184,9 +251,11 @@ class VectorSearchAgent {
       metadata: {
         namespace: 'Test Deck',
         searchTime: new Date().toISOString(),
-        averageScore: matches.length > 0 ? Math.round((matches.reduce((sum, m) => sum + m.score, 0) / matches.length) * 1000) / 1000 : 0,
+        averageScore: matches.length > 0 ? 
+          Math.round((matches.reduce((sum, m) => sum + m.score, 0) / matches.length) * 1000) / 1000 : 0,
         topScore: matches.length > 0 ? Math.round(matches[0].score * 1000) / 1000 : 0,
-        indexUsed: 'attruby-claims'
+        indexUsed: 'attruby-claims',
+        usage: queryResponse.usage || null
       }
     };
 
@@ -195,6 +264,11 @@ class VectorSearchAgent {
 
   buildCitation(metadata) {
     if (!metadata) return 'Citation information unavailable';
+    
+    // Use existing citation if available, otherwise build one
+    if (metadata.citation) {
+      return metadata.citation;
+    }
     
     const title = metadata.title || 'Unknown Title';
     const authors = metadata.authors || 'Unknown Authors';
@@ -213,11 +287,12 @@ class VectorSearchAgent {
   }
 
   extractKeyTerms(query) {
-    // Simple key term extraction - you could enhance this with NLP
+    const stopWords = ['therapy', 'treatment', 'analysis', 'study', 'research', 'clinical', 'medical'];
     const terms = query.toLowerCase()
       .split(/\s+/)
       .filter(term => term.length > 3)
-      .filter(term => !['therapy', 'treatment', 'analysis', 'study'].includes(term));
+      .filter(term => !stopWords.includes(term))
+      .slice(0, 10); // Limit to top 10 terms
     
     return [...new Set(terms)];
   }
@@ -227,18 +302,23 @@ class VectorSearchAgent {
     
     if (matches.length === 0) {
       gaps.push(`No relevant documents found for "${query}"`);
-      gaps.push('Consider using broader or alternative search terms');
-    } else if (matches.length < 5) {
-      gaps.push(`Limited literature available on "${query}" - only ${matches.length} relevant documents found`);
+      gaps.push('Try broader search terms or synonyms');
+      gaps.push('Check if topic is covered in knowledge base');
+    } else if (matches.length < 3) {
+      gaps.push(`Limited literature available - only ${matches.length} relevant documents found`);
+      gaps.push('Consider expanding search scope');
     }
     
-    // Check for low similarity scores
-    const lowScoreMatches = matches.filter(m => m.score < 0.7);
-    if (lowScoreMatches.length > matches.length / 2) {
-      gaps.push('Query may be too specific or use terminology not well-represented in the knowledge base');
+    // Analyze score distribution
+    const scores = matches.map(m => m.score);
+    const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    
+    if (avgScore < 0.7) {
+      gaps.push('Low relevance scores suggest query terms may not match knowledge base content well');
+      gaps.push('Consider using more specific terminology or domain-specific keywords');
     }
     
-    // Check for date gaps
+    // Check for recent publications
     const recentDocs = matches.filter(m => {
       const pubDate = new Date(m.metadata?.published || '2000-01-01');
       const twoYearsAgo = new Date();
@@ -246,32 +326,32 @@ class VectorSearchAgent {
       return pubDate > twoYearsAgo;
     });
     
-    if (recentDocs.length < matches.length * 0.3) {
-      gaps.push('Limited recent literature (published within last 2 years) found');
-      gaps.push('Consider searching for more recent publications outside this knowledge base');
+    if (matches.length > 0 && recentDocs.length < matches.length * 0.3) {
+      gaps.push('Limited recent literature (within last 2 years) found in knowledge base');
+      gaps.push('May need to search external databases for latest research');
     }
     
-    return gaps;
+    return gaps.slice(0, 5); // Limit to top 5 gaps
   }
 
   generateSummary(matches, query) {
     if (matches.length === 0) {
-      return `No relevant documents found in the knowledge base for "${query}". Consider broadening search terms or checking for alternative terminology.`;
+      return `No relevant documents found in the knowledge base for "${query}". The knowledge base may not contain information on this specific topic, or different search terms may be needed.`;
     }
     
     const topMatch = matches[0];
     const avgScore = matches.reduce((sum, m) => sum + m.score, 0) / matches.length;
     const uniqueAuthors = new Set(matches.map(m => m.metadata?.authors).filter(Boolean)).size;
     const uniqueJournals = new Set(matches.map(m => m.metadata?.journal).filter(Boolean)).size;
+    const uniqueSources = new Set(matches.map(m => m.metadata?.source_file).filter(Boolean)).size;
     
-    return `Found ${matches.length} relevant documents for "${query}" with average similarity score of ${avgScore.toFixed(3)}. ` +
-           `Top result: "${topMatch.metadata?.title || 'Unknown'}" (score: ${topMatch.score.toFixed(3)}). ` +
-           `Results span ${uniqueAuthors} unique author groups across ${uniqueJournals} different journals. ` +
-           `This provides a solid foundation for literature analysis and further research direction.`;
+    return `Retrieved ${matches.length} relevant documents for "${query}" with average similarity score of ${avgScore.toFixed(3)}. ` +
+           `Best match: "${topMatch.metadata?.title || 'Unknown'}" (relevance: ${topMatch.score.toFixed(3)}). ` +
+           `Results represent ${uniqueAuthors} different author groups across ${uniqueJournals} journals from ${uniqueSources} source documents. ` +
+           `This provides a ${matches.length >= 5 ? 'comprehensive' : 'limited but relevant'} evidence base for further analysis.`;
   }
 
   getVectorServiceUnavailableResponse(query) {
-    // Safe failure response - no fake medical data
     return {
       error: true,
       query: query,
@@ -282,9 +362,9 @@ class VectorSearchAgent {
       knowledgeGaps: ['Vector search service unavailable - cannot access knowledge base'],
       searchStrategy: 'service_unavailable',
       recommendations: [
-        'Verify Pinecone API configuration',
+        'Verify Pinecone API configuration in environment variables',
         'Check network connectivity to Pinecone service',
-        'Ensure proper environment variables are set',
+        'Ensure PINECONE_API_KEY is set correctly',
         'Contact system administrator if problem persists'
       ],
       timestamp: new Date().toISOString(),
@@ -308,9 +388,9 @@ class VectorSearchAgent {
       searchStrategy: 'error_fallback',
       recommendations: [
         'Check system logs for detailed error information',
-        'Verify database connectivity and configuration',
-        'Retry the search after resolving technical issues',
-        'Contact technical support if error persists'
+        'Verify Pinecone index configuration and accessibility',
+        'Ensure embedding model compatibility (text-embedding-3-small)',
+        'Retry the search after resolving technical issues'
       ],
       timestamp: new Date().toISOString(),
       metadata: {
