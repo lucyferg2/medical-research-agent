@@ -17,10 +17,10 @@ const agents = {
   medicalWriting: new MedicalWritingAgent()
 };
 
-// Vector Search endpoint - SIMPLIFIED
+// Vector Search endpoint - SIMPLIFIED TO AVOID ResponseTooLargeError
 router.post('/vector-search', async (req, res) => {
   try {
-    const { query, namespace = 'Test Deck', top_k = 10, include_metadata = true } = req.body;
+    const { query, top_k = 10 } = req.body;
     
     if (!query) {
       return res.status(400).json({ 
@@ -29,24 +29,28 @@ router.post('/vector-search', async (req, res) => {
       });
     }
     
-    const result = await agents.vectorSearch.search({
-      query,
-      namespace,
-      top_k,
-      include_metadata
-    });
+    console.log('Vector search request:', { query, top_k });
     
-    res.json({ success: true, data: result });
+    const result = await agents.vectorSearch.search({ query, top_k });
+    
+    // Return minimal response structure
+    const response = {
+      success: true,
+      data: result
+    };
+    
+    console.log('Vector search response size:', JSON.stringify(response).length, 'characters');
+    
+    res.json(response);
+    
   } catch (error) {
     console.error('Vector search endpoint error:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message,
-      details: 'Vector search service error'
+      error: error.message
     });
   }
 });
-
 
 // Literature Analysis endpoint
 router.post('/literature-analysis', async (req, res) => {
