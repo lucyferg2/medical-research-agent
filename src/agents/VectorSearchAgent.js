@@ -16,6 +16,7 @@ class VectorSearchAgent {
     }
 
     try {
+      // Use the newer Pinecone SDK initialization (no environment needed)
       this.pinecone = new Pinecone({
         apiKey: process.env.PINECONE_API_KEY
       });
@@ -75,69 +76,52 @@ class VectorSearchAgent {
         lastFew: embedding.slice(-3)
       });
 
-      // Try multiple query formats to match different SDK versions
-      let queryResponse;
+      // Use the newer Pinecone SDK format (v2.0+)
+      console.log('Attempting Pinecone query with SDK v2.0+ format');
       
-      // Format 1: Direct parameters (like Python SDK)
-      try {
-        console.log('Attempting query format 1: Direct parameters');
-        queryResponse = await this.index.query({
-          namespace: namespace,
-          vector: embedding,
-          topK: topK,
-          includeMetadata: includeMetadata
-        });
-        console.log('Format 1 successful');
-      } catch (error1) {
-        console.log('Format 1 failed:', error1.message);
-        
-        // Format 2: Camel case parameters
-        try {
-          console.log('Attempting query format 2: Camel case');
-          queryResponse = await this.index.query({
-            namespace: namespace,
-            vector: embedding,
-            top_k: topK,
-            include_metadata: includeMetadata
-          });
-          console.log('Format 2 successful');
-        } catch (error2) {
-          console.log('Format 2 failed:', error2.message);
-          
-          // Format 3: Without namespace (if namespace is causing issues)
-          try {
-            console.log('Attempting query format 3: No namespace');
-            queryResponse = await this.index.query({
-              vector: embedding,
-              topK: topK,
-              includeMetadata: includeMetadata
-            });
-            console.log('Format 3 successful');
-          } catch (error3) {
-            console.log('Format 3 failed:', error3.message);
-            
-            // Format 4: Minimal parameters only
-            try {
-              console.log('Attempting query format 4: Minimal');
-              queryResponse = await this.index.query({
-                vector: embedding,
-                topK: topK
-              });
-              console.log('Format 4 successful');
-            } catch (error4) {
-              console.log('All query formats failed. SDK might be incompatible.');
-              throw error4;
-            }
-          }
-        }
+      const queryRequest = {
+        vector: embedding,
+        topK: topK,
+        includeMetadata: includeMetadata
+      };
+
+      // Only add namespace if it's provided and not empty
+      if (namespace && namespace.trim() !== '') {
+        queryRequest.namespace = namespace;
+        console.log('Using namespace:', namespace);
+      } else {
+        console.log('Using default namespace (no namespace specified)');
       }
+
+      console.log('Query request structure:', {
+        hasVector: !!queryRequest.vector,
+        vectorLength: queryRequest.vector?.length,
+        topK: queryRequest.topK,
+        includeMetadata: queryRequest.includeMetadata,
+        namespace: queryRequest.namespace || 'default'
+      });
+
+      const queryResponse = await this.index.query(queryRequest);
       
       console.log('Pinecone query successful. Found', queryResponse.matches?.length || 0, 'matches');
+      
+      if (queryResponse.matches && queryResponse.matches.length > 0) {
+        console.log('First match:', {
+          id: queryResponse.matches[0].id,
+          score: queryResponse.matches[0].score,
+          hasMetadata: !!queryResponse.matches[0].metadata
+        });
+      }
+      
       return queryResponse;
       
     } catch (error) {
       console.error('Pinecone query error:', error);
-      console.error('Full error object:', JSON.stringify(error, null, 2));
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      if (error.cause) {
+        console.error('Error cause:', error.cause);
+      }
       throw error;
     }
   }
