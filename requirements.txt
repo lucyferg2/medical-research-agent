@@ -4,3 +4,7 @@ openai
 pinecone
 pydantic
 python-dotenv
+requests
+beautifulsoup4
+lxml
+google-api-python-client
