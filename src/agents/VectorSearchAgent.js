@@ -16,12 +16,12 @@ class VectorSearchAgent {
     }
 
     try {
-      // Initialize Pinecone client (matches Python v7+ pattern)
+      // Initialize Pinecone client
       this.pinecone = new Pinecone({
         apiKey: process.env.PINECONE_API_KEY
       });
       
-      // Get index reference (matches Python: pc.Index("index-name"))
+      // Get index reference - namespace handled differently in v3+
       this.index = this.pinecone.index('attruby-claims');
       console.log('Pinecone initialized successfully for medical research');
       
@@ -71,7 +71,18 @@ class VectorSearchAgent {
         return this.getVectorServiceUnavailableResponse(query);
       }
 
-      const results = await this.queryPinecone(query, namespace, top_k, include_metadata);
+      // For JavaScript SDK v3+, we need to get a namespace-specific index reference
+      let indexToQuery = this.index;
+      
+      if (namespace && namespace !== '' && namespace !== 'default') {
+        console.log('Creating namespace-specific index reference for:', namespace);
+        // In v3+ SDK, namespace is specified when getting the index
+        indexToQuery = this.pinecone.index('attruby-claims').namespace(namespace);
+      } else {
+        console.log('Using default namespace (no namespace specified)');
+      }
+
+      const results = await this.queryPineconeWithIndex(indexToQuery, query, top_k, include_metadata);
       return this.formatPineconeResults(results, query);
       
     } catch (error) {
@@ -80,7 +91,7 @@ class VectorSearchAgent {
     }
   }
 
-  async queryPinecone(query, namespace, topK, includeMetadata) {
+  async queryPineconeWithIndex(indexRef, query, topK, includeMetadata) {
     try {
       // Generate embedding for the query using OpenAI
       const embedding = await this.generateEmbedding(query);
@@ -91,50 +102,31 @@ class VectorSearchAgent {
         sample: embedding.slice(0, 3)
       });
 
-      // Based on Pinecone v7+ API and your Python code pattern
-      console.log('Querying Pinecone with v7+ API format');
-      
-      // Your Python code uses:
-      // results = index.query(
-      //     namespace="",
-      //     vector=embedding, 
-      //     top_k=query_data.top_k,
-      //     include_metadata=True
-      // )
+      // FIXED: Use only valid properties for Pinecone JavaScript SDK v3+
+      // Valid properties: id, vector, sparseVector, includeValues, includeMetadata, filter, topK
+      console.log('Querying Pinecone with JavaScript SDK v3+ format');
       
       const queryOptions = {
         vector: embedding,
         topK: topK,
-        includeMetadata: includeMetadata
+        includeMetadata: includeMetadata,
+        includeValues: false  // We don't need vector values in response
       };
-
-      // Handle namespace - your Python uses empty string ""
-      if (namespace === 'Test Deck') {
-        queryOptions.namespace = 'Test Deck';
-        console.log('Using Test Deck namespace');
-      } else if (namespace === '' || !namespace) {
-        queryOptions.namespace = '';
-        console.log('Using empty namespace (matching Python pattern)');
-      } else {
-        queryOptions.namespace = namespace;
-        console.log('Using custom namespace:', namespace);
-      }
 
       console.log('Query options:', {
         hasVector: !!queryOptions.vector,
         vectorDimension: queryOptions.vector.length,
         topK: queryOptions.topK,
         includeMetadata: queryOptions.includeMetadata,
-        namespace: queryOptions.namespace
+        includeValues: queryOptions.includeValues
       });
 
-      // Execute query
-      const queryResponse = await this.index.query(queryOptions);
+      // Execute query using the index reference (with or without namespace)
+      const queryResponse = await indexRef.query(queryOptions);
       
       console.log('Pinecone query successful:', {
         matchCount: queryResponse.matches?.length || 0,
-        hasUsage: !!queryResponse.usage,
-        namespace: queryOptions.namespace
+        hasUsage: !!queryResponse.usage
       });
       
       if (queryResponse.matches && queryResponse.matches.length > 0) {
@@ -160,28 +152,11 @@ class VectorSearchAgent {
         body: error.body
       });
       
-      // Try alternative query format if the first one fails
-      if (error.message.includes('additional properties') || error.message.includes('validation')) {
-        console.log('Trying alternative query format...');
-        try {
-          const embedding = await this.generateEmbedding(query);
-          
-          // Minimal query format
-          const altQueryResponse = await this.index.query({
-            vector: embedding,
-            topK: topK
-          });
-          
-          console.log('Alternative query format successful');
-          return altQueryResponse;
-        } catch (altError) {
-          console.error('Alternative query also failed:', altError.message);
-        }
-      }
-      
       throw error;
     }
   }
+
+  // Remove the old queryPinecone method since we now use queryPineconeWithIndex
 
   async generateEmbedding(text) {
     try {
