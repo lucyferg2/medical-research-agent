@@ -38,6 +38,7 @@ class VectorSearchAgent {
       // Test with a simple query to verify connection
       const testQuery = await this.index.describeIndexStats();
       console.log('Pinecone connection verified. Index contains:', testQuery.totalVectorCount, 'vectors');
+      console.log('Index dimension:', testQuery.dimension);
     } catch (error) {
       console.error('Pinecone connection test failed:', error);
       throw error;
@@ -68,33 +69,75 @@ class VectorSearchAgent {
       // Generate embedding for the query using OpenAI
       const embedding = await this.generateEmbedding(query);
       
-      // FIXED: Correct Pinecone query format
-      const queryRequest = {
-        vector: embedding,
-        topK: topK,
-        includeMetadata: includeMetadata
-      };
-
-      // Only add namespace if it's provided and not empty
-      if (namespace && namespace.trim()) {
-        queryRequest.namespace = namespace;
-      }
-
-      console.log('Querying Pinecone with:', {
-        vectorLength: embedding.length,
-        topK,
-        includeMetadata,
-        namespace: namespace || 'default'
+      console.log('Generated embedding:', {
+        length: embedding.length,
+        firstFew: embedding.slice(0, 3),
+        lastFew: embedding.slice(-3)
       });
 
-      // Query Pinecone with correct format
-      const queryResponse = await this.index.query(queryRequest);
+      // Try multiple query formats to match different SDK versions
+      let queryResponse;
+      
+      // Format 1: Direct parameters (like Python SDK)
+      try {
+        console.log('Attempting query format 1: Direct parameters');
+        queryResponse = await this.index.query({
+          namespace: namespace,
+          vector: embedding,
+          topK: topK,
+          includeMetadata: includeMetadata
+        });
+        console.log('Format 1 successful');
+      } catch (error1) {
+        console.log('Format 1 failed:', error1.message);
+        
+        // Format 2: Camel case parameters
+        try {
+          console.log('Attempting query format 2: Camel case');
+          queryResponse = await this.index.query({
+            namespace: namespace,
+            vector: embedding,
+            top_k: topK,
+            include_metadata: includeMetadata
+          });
+          console.log('Format 2 successful');
+        } catch (error2) {
+          console.log('Format 2 failed:', error2.message);
+          
+          // Format 3: Without namespace (if namespace is causing issues)
+          try {
+            console.log('Attempting query format 3: No namespace');
+            queryResponse = await this.index.query({
+              vector: embedding,
+              topK: topK,
+              includeMetadata: includeMetadata
+            });
+            console.log('Format 3 successful');
+          } catch (error3) {
+            console.log('Format 3 failed:', error3.message);
+            
+            // Format 4: Minimal parameters only
+            try {
+              console.log('Attempting query format 4: Minimal');
+              queryResponse = await this.index.query({
+                vector: embedding,
+                topK: topK
+              });
+              console.log('Format 4 successful');
+            } catch (error4) {
+              console.log('All query formats failed. SDK might be incompatible.');
+              throw error4;
+            }
+          }
+        }
+      }
       
       console.log('Pinecone query successful. Found', queryResponse.matches?.length || 0, 'matches');
       return queryResponse;
       
     } catch (error) {
       console.error('Pinecone query error:', error);
+      console.error('Full error object:', JSON.stringify(error, null, 2));
       throw error;
     }
   }
@@ -104,13 +147,18 @@ class VectorSearchAgent {
       const OpenAI = require('openai');
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       
+      console.log('Generating embedding for text:', text.substring(0, 100) + '...');
+      
       const response = await openai.embeddings.create({
         model: 'text-embedding-3-small',
         input: text,
         encoding_format: 'float',
       });
 
-      return response.data[0].embedding;
+      const embedding = response.data[0].embedding;
+      console.log('Embedding generated successfully. Length:', embedding.length);
+      
+      return embedding;
     } catch (error) {
       console.error('Embedding generation error:', error);
       throw error;
@@ -119,6 +167,13 @@ class VectorSearchAgent {
 
   formatPineconeResults(queryResponse, originalQuery) {
     const matches = queryResponse.matches || [];
+    
+    console.log('Formatting results:', {
+      matchCount: matches.length,
+      firstMatchId: matches[0]?.id,
+      firstMatchScore: matches[0]?.score,
+      hasMetadata: !!matches[0]?.metadata
+    });
     
     const formattedResults = {
       query: originalQuery,
