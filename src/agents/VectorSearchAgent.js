@@ -68,15 +68,31 @@ class VectorSearchAgent {
       // Generate embedding for the query using OpenAI
       const embedding = await this.generateEmbedding(query);
       
-      // Query Pinecone
-      const queryResponse = await this.index.query({
+      // FIXED: Correct Pinecone query format
+      const queryRequest = {
         vector: embedding,
         topK: topK,
-        includeMetadata: includeMetadata,
-        namespace: namespace
+        includeMetadata: includeMetadata
+      };
+
+      // Only add namespace if it's provided and not empty
+      if (namespace && namespace.trim()) {
+        queryRequest.namespace = namespace;
+      }
+
+      console.log('Querying Pinecone with:', {
+        vectorLength: embedding.length,
+        topK,
+        includeMetadata,
+        namespace: namespace || 'default'
       });
 
+      // Query Pinecone with correct format
+      const queryResponse = await this.index.query(queryRequest);
+      
+      console.log('Pinecone query successful. Found', queryResponse.matches?.length || 0, 'matches');
       return queryResponse;
+      
     } catch (error) {
       console.error('Pinecone query error:', error);
       throw error;
@@ -110,7 +126,7 @@ class VectorSearchAgent {
       keyTerms: this.extractKeyTerms(originalQuery),
       relevantDocuments: matches.map((match, index) => ({
         id: match.id,
-        score: match.score,
+        score: Math.round(match.score * 1000) / 1000, // Round to 3 decimal places
         rank: index + 1,
         title: match.metadata?.title || 'Unknown Title',
         authors: match.metadata?.authors || 'Unknown Authors',
@@ -129,8 +145,9 @@ class VectorSearchAgent {
       metadata: {
         namespace: 'Test Deck',
         searchTime: new Date().toISOString(),
-        averageScore: matches.length > 0 ? matches.reduce((sum, m) => sum + m.score, 0) / matches.length : 0,
-        topScore: matches.length > 0 ? matches[0].score : 0
+        averageScore: matches.length > 0 ? Math.round((matches.reduce((sum, m) => sum + m.score, 0) / matches.length) * 1000) / 1000 : 0,
+        topScore: matches.length > 0 ? Math.round(matches[0].score * 1000) / 1000 : 0,
+        indexUsed: 'attruby-claims'
       }
     };
 
@@ -171,6 +188,7 @@ class VectorSearchAgent {
     
     if (matches.length === 0) {
       gaps.push(`No relevant documents found for "${query}"`);
+      gaps.push('Consider using broader or alternative search terms');
     } else if (matches.length < 5) {
       gaps.push(`Limited literature available on "${query}" - only ${matches.length} relevant documents found`);
     }
@@ -191,6 +209,7 @@ class VectorSearchAgent {
     
     if (recentDocs.length < matches.length * 0.3) {
       gaps.push('Limited recent literature (published within last 2 years) found');
+      gaps.push('Consider searching for more recent publications outside this knowledge base');
     }
     
     return gaps;
