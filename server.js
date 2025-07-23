@@ -15,17 +15,32 @@ const healthRoutes = require('./src/routes/healthRoutes');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// CRITICAL: Configure trust proxy for Render deployment
+app.set('trust proxy', 1); // Trust first proxy (Render's load balancer)
+
 // Security middleware
 app.use(helmet());
 app.use(compression());
 app.use(morgan('combined'));
 
-// Rate limiting
+// Rate limiting - Fixed for proxy environments
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // requests per windowMs
+  message: {
+    success: false,
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  // Custom key generator that works with proxies
+  keyGenerator: (req) => {
+    return req.ip || req.connection.remoteAddress || 'unknown';
+  }
 });
+
+// Apply rate limiting to API routes only
 app.use('/api/', limiter);
 
 // CORS configuration
@@ -38,6 +53,25 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Medical Research Agent API is running!',
+    version: '1.0.0',
+    status: 'healthy',
+    endpoints: [
+      '/api/health',
+      '/api/agents/vector-search',
+      '/api/agents/literature-analysis',
+      '/api/agents/clinical-trials',
+      '/api/agents/competitive-intel',
+      '/api/agents/regulatory-analysis',
+      '/api/agents/medical-writing',
+      '/api/sequential-workflow'
+    ]
+  });
+});
 
 // Routes
 app.use('/api/health', healthRoutes);
@@ -117,23 +151,7 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   console.log(`Medical Research Agent server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
-
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Medical Research Agent API is running!',
-    version: '1.0.0',
-    endpoints: [
-      '/api/health',
-      '/api/agents/vector-search',
-      '/api/agents/literature-analysis',
-      '/api/agents/clinical-trials',
-      '/api/agents/competitive-intel',
-      '/api/agents/regulatory-analysis',
-      '/api/agents/medical-writing',
-      '/api/sequential-workflow'
-    ]
-  });
+  console.log(`Trust proxy enabled: ${app.get('trust proxy')}`);
 });
 
 module.exports = app;
