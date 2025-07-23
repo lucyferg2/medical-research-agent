@@ -17,10 +17,17 @@ const agents = {
   medicalWriting: new MedicalWritingAgent()
 };
 
-// Vector Search endpoint
+// Vector Search endpoint - SIMPLIFIED
 router.post('/vector-search', async (req, res) => {
   try {
-    const { query, namespace, top_k = 10, include_metadata = true } = req.body;
+    const { query, namespace = 'Test Deck', top_k = 10, include_metadata = true } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Query parameter is required' 
+      });
+    }
     
     const result = await agents.vectorSearch.search({
       query,
@@ -31,9 +38,15 @@ router.post('/vector-search', async (req, res) => {
     
     res.json({ success: true, data: result });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Vector search endpoint error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      details: 'Vector search service error'
+    });
   }
 });
+
 
 // Literature Analysis endpoint
 router.post('/literature-analysis', async (req, res) => {
