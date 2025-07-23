@@ -119,4 +119,21 @@ app.listen(PORT, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Medical Research Agent API is running!',
+    version: '1.0.0',
+    endpoints: [
+      '/api/health',
+      '/api/agents/vector-search',
+      '/api/agents/literature-analysis',
+      '/api/agents/clinical-trials',
+      '/api/agents/competitive-intel',
+      '/api/agents/regulatory-analysis',
+      '/api/agents/medical-writing',
+      '/api/sequential-workflow'
+    ]
+  });
+});
+
 module.exports = app;
