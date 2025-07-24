@@ -12,8 +12,6 @@ from googleapiclient.discovery import build
 from pinecone import Pinecone
 from pydantic import BaseModel, field_validator
 import openai
-
-
 from typing import List, Optional
 
 # --- INITIALIZATION AND CONFIGURATION ---
@@ -173,49 +171,52 @@ async def generate_embedding(text: str) -> List[float]:
         logger.error(f"Embedding generation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate embedding.")
 
+# Create a single, reusable session object to persist cookies and headers
+session = requests.Session()
+session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Cache-Control': 'max-age=0',
+})
+
 def get_web_content(url: str) -> str:
     """
-    Fetches, identifies, and parses content from a URL, handling HTML, XML, and skipping PDFs.
+    Fetches and parses content using a persistent session to better mimic a real browser.
     """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.google.com/'
-    }
-    
     try:
-        response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
-        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        # Use the session object for the request
+        response = session.get(url, timeout=20, allow_redirects=True)
+        response.raise_for_status()
 
         content_type = response.headers.get('content-type', '').lower()
 
-        # Skip PDFs
         if 'pdf' in content_type:
             logger.warning(f"Skipping PDF content from {url}")
             return f"Content from {url} is a PDF and was not processed."
 
-        # Parse XML content
         if 'xml' in content_type:
-            soup = BeautifulSoup(response.content, 'lxml-xml') # Use the XML parser
-            text = soup.get_text(separator='\n', strip=True)
-            logger.info(f"Successfully parsed XML content from {url}")
-        
-        # Parse HTML content
+            soup = BeautifulSoup(response.content, 'lxml-xml')
         else:
-            soup = BeautifulSoup(response.content, 'lxml') # Use the standard lxml HTML parser
-            for element in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form']):
-                element.decompose()
-            text = soup.get_text(separator='\n', strip=True)
-            logger.info(f"Successfully parsed HTML content from {url}")
-            
-        return ' '.join(text.split())[:8000] # Increased limit for more context
+            soup = BeautifulSoup(response.content, 'lxml')
+        
+        for element in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'figure']):
+            element.decompose()
+        
+        text = soup.get_text(separator='\n', strip=True)
+        logger.info(f"Successfully scraped content from {url}")
+        return ' '.join(text.split())[:8000]
 
     except requests.exceptions.RequestException as e:
-        logger.warning(f"Failed to fetch content from {url}: {e}")
-        return f"Could not retrieve content from {url}. Reason: {e}"
-
-
+        logger.error(f"Failed to fetch content from {url} after enhancements. Reason: {e}")
+        return f"Could not retrieve content. The site may be blocking automated access. Reason: {e}"
 async def summarize_with_openai(prompt: str, context_data: str) -> dict:
     """Uses OpenAI to summarize context data based on a prompt."""
     try:
