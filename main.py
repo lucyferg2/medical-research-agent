@@ -174,18 +174,47 @@ async def generate_embedding(text: str) -> List[float]:
         raise HTTPException(status_code=500, detail="Failed to generate embedding.")
 
 def get_web_content(url: str) -> str:
-    """Fetches and parses text content from a URL."""
+    """
+    Fetches, identifies, and parses content from a URL, handling HTML, XML, and skipping PDFs.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.google.com/'
+    }
+    
     try:
-        response = requests.get(url, timeout=10, headers={'User-Agent': 'MedicalResearchAgent/1.0'})
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'lxml')
-        for script_or_style in soup(['script', 'style', 'header', 'footer', 'nav']):
-            script_or_style.decompose()
-        text = soup.get_text(separator='\n', strip=True)
-        return ' '.join(text.split())[:4000] # Limit content length
-    except Exception as e:
+        response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+
+        content_type = response.headers.get('content-type', '').lower()
+
+        # Skip PDFs
+        if 'pdf' in content_type:
+            logger.warning(f"Skipping PDF content from {url}")
+            return f"Content from {url} is a PDF and was not processed."
+
+        # Parse XML content
+        if 'xml' in content_type:
+            soup = BeautifulSoup(response.content, 'lxml-xml') # Use the XML parser
+            text = soup.get_text(separator='\n', strip=True)
+            logger.info(f"Successfully parsed XML content from {url}")
+        
+        # Parse HTML content
+        else:
+            soup = BeautifulSoup(response.content, 'lxml') # Use the standard lxml HTML parser
+            for element in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form']):
+                element.decompose()
+            text = soup.get_text(separator='\n', strip=True)
+            logger.info(f"Successfully parsed HTML content from {url}")
+            
+        return ' '.join(text.split())[:8000] # Increased limit for more context
+
+    except requests.exceptions.RequestException as e:
         logger.warning(f"Failed to fetch content from {url}: {e}")
-        return ""
+        return f"Could not retrieve content from {url}. Reason: {e}"
+
 
 async def summarize_with_openai(prompt: str, context_data: str) -> dict:
     """Uses OpenAI to summarize context data based on a prompt."""
@@ -444,32 +473,36 @@ async def sequential_workflow(request: SequentialWorkflowRequest):
     intervention = query_parts[0].strip()
 
     try:
-        # Step 1: Vector Search Agent
+        # Step 1: Vector Search Agent (No change here)
         vector_res = await vector_search_agent(VectorSearchRequest(query=request.query))
         vector_findings = {"summary": f"Found {len(vector_res['data'])} documents.", "top_hits": vector_res['data'][:3]}
         logger.info(f"[{session_id}] Vector Search complete.")
 
         # Step 2: Literature Analysis Agent
+        # The 'prior_context' will now be the full findings from the vector search
         lit_res = await literature_analysis_agent(LiteratureAnalysisRequest(query=request.query, prior_context=json.dumps(vector_findings)))
         literature_findings = lit_res['data']
         logger.info(f"[{session_id}] Literature Analysis complete.")
 
         # Step 3: Clinical Trials Agent
-        clinical_res = await clinical_trials_agent(ClinicalTrialsRequest(condition=condition, intervention=intervention, literature_context=literature_findings.get('summary')))
+        # Pass the FULL literature_findings object, not just the summary
+        clinical_res = await clinical_trials_agent(ClinicalTrialsRequest(condition=condition, intervention=intervention, literature_context=json.dumps(literature_findings)))
         clinical_findings = clinical_res['data']
         logger.info(f"[{session_id}] Clinical Trials Analysis complete.")
 
         # Step 4: Competitive Intelligence Agent
-        comp_res = await competitive_intelligence_agent(CompetitiveIntelRequest(market_area=request.query, clinical_context=clinical_findings.get('summary')))
+        # Pass the FULL clinical_findings object
+        comp_res = await competitive_intelligence_agent(CompetitiveIntelRequest(market_area=request.query, clinical_context=json.dumps(clinical_findings)))
         competitive_findings = comp_res['data']
         logger.info(f"[{session_id}] Competitive Intelligence complete.")
         
         # Step 5: Regulatory Analysis Agent
-        reg_res = await regulatory_analysis_agent(RegulatoryAnalysisRequest(therapeutic_area=intervention, competitive_context=competitive_findings.get('summary')))
+        # Pass the FULL competitive_findings object
+        reg_res = await regulatory_analysis_agent(RegulatoryAnalysisRequest(therapeutic_area=intervention, competitive_context=json.dumps(competitive_findings)))
         regulatory_findings = reg_res['data']
         logger.info(f"[{session_id}] Regulatory Analysis complete.")
 
-        # Step 6: Medical Writing Agent
+        # Step 6: Medical Writing Agent (No change here, it already receives the full objects)
         final_report_res = await medical_writing_agent(MedicalWritingRequest(
             report_type=request.reportType,
             vector_findings=vector_findings,
@@ -485,6 +518,7 @@ async def sequential_workflow(request: SequentialWorkflowRequest):
     except Exception as e:
         logger.error(f"Sequential workflow failed: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Sequential workflow failed: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
