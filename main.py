@@ -13,6 +13,9 @@ from pinecone import Pinecone
 from pydantic import BaseModel
 import openai
 
+from pydantic import BaseModel, validator
+from typing import List, Optional
+
 # --- INITIALIZATION AND CONFIGURATION ---
 
 # Initialize FastAPI app
@@ -56,26 +59,76 @@ class VectorSearchRequest(BaseModel):
     top_k: int = 10
     namespace: str = "Test Deck"
 
+    @validator('query', 'namespace')
+    def not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('must not be empty')
+        return v
+
+    @validator('top_k')
+    def top_k_must_be_positive(cls, v):
+        if v <= 0:
+            raise ValueError('must be a positive integer')
+        return v
+
 class LiteratureAnalysisRequest(BaseModel):
     query: str
     focus_areas: Optional[List[str]] = []
     prior_context: Optional[str] = None
+
+    @validator('query')
+    def query_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('query must not be empty')
+        return v
+
+    @validator('focus_areas')
+    def focus_areas_not_empty(cls, v):
+        if any(not area.strip() for area in v):
+            raise ValueError('focus_areas must not contain empty strings')
+        return v
 
 class ClinicalTrialsRequest(BaseModel):
     condition: str
     intervention: str
     phase: Optional[str] = "All"
     literature_context: Optional[str] = None
+    
+    @validator('phase')
+    def phase_must_be_valid(cls, v):
+        allowed_phases = ["All", "Phase 1", "Phase 2", "Phase 3", "Phase 4"]
+        if v not in allowed_phases:
+            raise ValueError(f'phase must be one of {allowed_phases}')
+        return v
 
 class CompetitiveIntelRequest(BaseModel):
     market_area: str
     competitors: Optional[List[str]] = []
     clinical_context: Optional[str] = None
 
+    @validator('market_area')
+    def market_area_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('market_area must not be empty')
+        return v
+
 class RegulatoryAnalysisRequest(BaseModel):
     therapeutic_area: str
     regulatory_region: str = "FDA"
     competitive_context: Optional[str] = None
+
+    @validator('therapeutic_area')
+    def therapeutic_area_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('therapeutic_area must not be empty')
+        return v
+
+    @validator('regulatory_region')
+    def region_must_be_valid(cls, v):
+        allowed_regions = ["FDA", "EMA"]
+        if v not in allowed_regions:
+            raise ValueError(f'regulatory_region must be one of {allowed_regions}')
+        return v
 
 class MedicalWritingRequest(BaseModel):
     report_type: str = "comprehensive"
@@ -85,9 +138,29 @@ class MedicalWritingRequest(BaseModel):
     competitive_findings: Optional[dict] = None
     regulatory_findings: Optional[dict] = None
 
+    @validator('report_type')
+    def report_type_must_be_valid(cls, v):
+        allowed_types = ["comprehensive", "executive", "technical", "strategic"]
+        if v not in allowed_types:
+            raise ValueError(f'report_type must be one of {allowed_types}')
+        return v
+
 class SequentialWorkflowRequest(BaseModel):
     query: str
     reportType: str = "comprehensive"
+
+    @validator('query')
+    def query_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('query must not be empty')
+        return v
+
+    @validator('reportType')
+    def report_type_must_be_valid(cls, v):
+        allowed_types = ["comprehensive", "executive", "technical", "strategic"]
+        if v not in allowed_types:
+            raise ValueError(f'reportType must be one of {allowed_types}')
+        return v
 
 # --- UTILITY FUNCTIONS ---
 
@@ -117,9 +190,9 @@ def get_web_content(url: str) -> str:
 async def summarize_with_openai(prompt: str, context_data: str) -> dict:
     """Uses OpenAI to summarize context data based on a prompt."""
     try:
-        full_prompt = f"{prompt}\n\nAnalyze the following data and provide a structured JSON response:\n\n{context_data}"
+        full_prompt = f"{prompt}\n\nAnalyze the following data, always provide references to where the information came from, and provide a structured JSON response:\n\n{context_data}"
         response = openai.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4.1-mini",
             messages=[{"role": "user", "content": full_prompt}],
             temperature=0.2,
             response_format={"type": "json_object"}
@@ -158,9 +231,12 @@ async def vector_search_agent(request: VectorSearchRequest):
 @app.post("/api/agents/literature-analysis")
 async def literature_analysis_agent(request: LiteratureAnalysisRequest):
     """Literature analysis agent using the PubMed API."""
+    logger.info(f"Starting literature analysis for query: {request.query}")
+    logger.debug(f"Request details: {request.dict()}")
     try:
         # 1. Search PubMed for article IDs
         search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+        logger.info(f"Search: {search_url}")
         search_params = {"db": "pubmed", "term": request.query, "retmode": "json", "retmax": 15}
         search_res = requests.get(search_url, params=search_params).json()
         id_list = search_res.get("esearchresult", {}).get("idlist", [])
@@ -169,12 +245,14 @@ async def literature_analysis_agent(request: LiteratureAnalysisRequest):
 
         # 2. Fetch article abstracts
         fetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+        logger.info(f"Fetch URL: {fetch_url}")
         fetch_params = {"db": "pubmed", "id": ",".join(id_list), "retmode": "xml"}
         fetch_res = requests.get(fetch_url, params=fetch_params).text
         
         # 3. Summarize with OpenAI
         prompt = f"""
         You are a biomedical literature expert. Analyze the provided PubMed article data (in XML format) for the query: "{request.query}".
+        For each key finding, you MUST include the PubMed ID (PMID) of the source article in the format [PMID: XXXXXX].
         Focus on: {request.focus_areas or 'general analysis'}.
         Prior context: {request.prior_context or 'None'}.
         Provide a structured analysis including:
@@ -182,8 +260,11 @@ async def literature_analysis_agent(request: LiteratureAnalysisRequest):
         - evidenceGrade: A quality assessment of the evidence (e.g., High, Medium, Low).
         - emergingTrends: Any new or emerging trends identified.
         - summary: A concise overview of the literature landscape.
+        - references: A list of all PMIDs for the articles analyzed.
         """
         summary = await summarize_with_openai(prompt, fetch_res[:25000]) # Truncate for API limits
+        logger.info(f"Successfully completed literature analysis for query: {request.query}")
+        logger.debug(f"Response data: {summary}")
         return {"success": True, "data": summary}
     except Exception as e:
         logger.error(f"Literature analysis failed: {e}\n{traceback.format_exc()}")
@@ -191,10 +272,13 @@ async def literature_analysis_agent(request: LiteratureAnalysisRequest):
 
 @app.post("/api/agents/clinical-trials")
 async def clinical_trials_agent(request: ClinicalTrialsRequest):
+    logger.info(f"Starting clinical trials analysis for query: {request.query}")
+    logger.debug(f"Request details: {request.dict()}")
     """Clinical trials analysis using the ClinicalTrials.gov API."""
     try:
         # 1. Search ClinicalTrials.gov
         api_url = "https://clinicaltrials.gov/api/v2/studies"
+        logger.info(f"Search: {api_url}")
         query = f"{request.condition} AND {request.intervention}"
         if request.phase != "All":
             query += f" AND phase:{request.phase}"
@@ -211,13 +295,17 @@ async def clinical_trials_agent(request: ClinicalTrialsRequest):
         You are a clinical trials intelligence analyst. Based on the provided data from ClinicalTrials.gov, analyze the trial landscape for:
         - Condition: {request.condition}
         - Intervention: {request.intervention}
+        The ClinicalTrials.gov API returns a 'protocolSection' with an 'identificationModule' that contains the nctId. You should extract this ID for each trial.
         Provide an analysis including:
         - keySponsors: The main companies or organizations.
         - trialPhaseBreakdown: A summary of trial phases (e.g., Phase 1, Phase 2).
         - competitiveLandscape: An analysis of the competitive environment based on the trials.
         - summary: A strategic overview of the clinical trial landscape.
+        - references: A list of all nctId for the trials analyzed.
         """
         summary = await summarize_with_openai(prompt, json.dumps(trials_data)[:25000])
+        logger.info(f"Successfully completed clinical trial analysis for query: {request.query}")
+        logger.debug(f"Response data: {summary}")
         return {"success": True, "data": summary}
     except Exception as e:
         logger.error(f"Clinical trials analysis failed: {e}\n{traceback.format_exc()}")
@@ -225,10 +313,13 @@ async def clinical_trials_agent(request: ClinicalTrialsRequest):
 
 @app.post("/api/agents/competitive-intel")
 async def competitive_intelligence_agent(request: CompetitiveIntelRequest):
+    logger.info(f"Starting competitor intelligence for query: {request.query}")
+    logger.debug(f"Request details: {request.dict()}")
     """Competitive intelligence using Google Search API."""
     try:
         service = build("customsearch", "v1", developerKey=google_api_key)
         search_query = f"market analysis and competitors for {request.market_area}"
+        logger.info(f"Search query: {search_query}")
         res = service.cse().list(q=search_query, cx=google_cse_id, num=5).execute()
         
         items = res.get('items', [])
@@ -243,13 +334,17 @@ async def competitive_intelligence_agent(request: CompetitiveIntelRequest):
         You are a pharmaceutical market intelligence expert. Analyze the provided web search results about '{request.market_area}'.
         Known competitors to consider: {request.competitors or 'None'}.
         Clinical context: {request.clinical_context or 'None'}.
+        For each key finding, you MUST include the URL of the source article in the format [URL: XXXXXX]. ALways provide the full URL, never truncate or summarize 
         Provide a structured analysis with:
         - marketOpportunities: Identified market gaps or opportunities.
         - competitiveThreats: Key threats from competitors.
         - keyPlayers: Analysis of major companies in this space.
         - summary: A strategic competitive overview.
+        - references:  A list of all URLs for the pages analyzed.
         """
         summary = await summarize_with_openai(prompt, content)
+        logger.info(f"Successfully completed literature analysis for query: {request.query}")
+        logger.debug(f"Response data: {summary}")
         return {"success": True, "data": summary}
     except Exception as e:
         logger.error(f"Competitive intelligence failed: {e}\n{traceback.format_exc()}")
@@ -258,10 +353,14 @@ async def competitive_intelligence_agent(request: CompetitiveIntelRequest):
 
 @app.post("/api/agents/regulatory-analysis")
 async def regulatory_analysis_agent(request: RegulatoryAnalysisRequest):
+    logger.info(f"Starting regulatory analysis for query: {request.query}")
+    logger.debug(f"Request details: {request.dict()}")
     """Regulatory analysis using Google Search API."""
     try:
         service = build("customsearch", "v1", developerKey=google_api_key)
         search_query = f"{request.regulatory_region} regulatory guidance for {request.therapeutic_area}"
+        logger.info(f"Search query: {search_query}")
+        
         # Prioritize government and agency sites in search
         res = service.cse().list(q=search_query, cx=google_cse_id, num=5, siteSearch="*.gov").execute()
 
@@ -274,13 +373,17 @@ async def regulatory_analysis_agent(request: RegulatoryAnalysisRequest):
         prompt = f"""
         You are a regulatory affairs expert. Analyze the provided web search results regarding '{request.therapeutic_area}' for the {request.regulatory_region} region.
         Competitive context: {request.competitive_context or 'None'}.
+        For each key finding, you MUST include the URL of the source article in the format [URL: XXXXXX]. ALways provide the full URL, never truncate or summarize 
         Provide analysis with:
         - applicableGuidances: Summary of relevant guidance documents.
         - potentialPathways: Recommended regulatory submission strategies (e.g., accelerated approval).
         - keyConsiderations: Important regulatory hurdles or requirements.
         - summary: A comprehensive regulatory environment analysis.
+        - references: A list of all URLs for the articles analyzed.
         """
         summary = await summarize_with_openai(prompt, content)
+        logger.info(f"Successfully completed literature analysis for query: {request.query}")
+        logger.debug(f"Response data: {summary}")
         return {"success": True, "data": summary}
     except Exception as e:
         logger.error(f"Regulatory analysis failed: {e}\n{traceback.format_exc()}")
@@ -289,10 +392,14 @@ async def regulatory_analysis_agent(request: RegulatoryAnalysisRequest):
 
 @app.post("/api/agents/medical-writing")
 async def medical_writing_agent(request: MedicalWritingRequest):
+    logger.info(f"Starting medical writer for query: {request.query}")
+    logger.debug(f"Request details: {request.dict()}")
     """Medical writing agent to synthesize all findings."""
     try:
         prompt = f"""
         You are an expert medical writer. Synthesize all provided findings into a single, comprehensive '{request.report_type}' report.
+        You MUST include inline citations for every piece of information, using the provided references. For example: [PMID: 123456] or [NCT: 12345678] or [Source: https://example.com].
+
         Integrate the following structured data into a cohesive narrative. Do not simply list the findings; create a well-structured report.
         
         1. Vector Search Findings: {json.dumps(request.vector_findings, indent=2)}
@@ -308,17 +415,20 @@ async def medical_writing_agent(request: MedicalWritingRequest):
         - marketIntelligence: Assessment of market dynamics, opportunities, and threats.
         - regulatoryEnvironment: Analysis of pathways and compliance considerations.
         - strategicRecommendations: A list of clear, actionable next steps.
+        - references: A complete list of all sources cited in the report.
         
         Format the entire output as a single JSON object containing these keys.
         """
         # Note: We are not using the `summarize_with_openai` utility here because the prompt is complex and specific.
         response = openai.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             response_format={"type": "json_object"}
         )
         report = json.loads(response.choices[0].message.content)
+        logger.info(f"Successfully generated report: {request.query}")
+        logger.debug(f"Response data: {report}")
         return {"success": True, "data": report}
     except Exception as e:
         logger.error(f"Medical writing failed: {e}\n{traceback.format_exc()}")
