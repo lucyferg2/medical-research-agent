@@ -232,7 +232,7 @@ async def vector_search_agent(request: VectorSearchRequest):
 async def literature_analysis_agent(request: LiteratureAnalysisRequest):
     """Literature analysis agent using the PubMed API."""
     logger.info(f"Starting literature analysis for query: {request.query}")
-    logger.debug(f"Request details: {request.dict()}")
+    logger.debug(f"Request details: {request.model_dump()}")
     try:
         # 1. Search PubMed for article IDs
         search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
@@ -272,8 +272,8 @@ async def literature_analysis_agent(request: LiteratureAnalysisRequest):
 
 @app.post("/api/agents/clinical-trials")
 async def clinical_trials_agent(request: ClinicalTrialsRequest):
-    logger.info(f"Starting clinical trials analysis for query: {request.query}")
-    logger.debug(f"Request details: {request.dict()}")
+    logger.info(f"Starting clinical trials analysis for condition: {request.condition}, intervention: {request.intervention}")
+    logger.debug(f"Request details: {request.model_dump()}")
     """Clinical trials analysis using the ClinicalTrials.gov API."""
     try:
         # 1. Search ClinicalTrials.gov
@@ -304,7 +304,6 @@ async def clinical_trials_agent(request: ClinicalTrialsRequest):
         - references: A list of all nctId for the trials analyzed.
         """
         summary = await summarize_with_openai(prompt, json.dumps(trials_data)[:25000])
-        logger.info(f"Successfully completed clinical trial analysis for query: {request.query}")
         logger.debug(f"Response data: {summary}")
         return {"success": True, "data": summary}
     except Exception as e:
@@ -313,8 +312,8 @@ async def clinical_trials_agent(request: ClinicalTrialsRequest):
 
 @app.post("/api/agents/competitive-intel")
 async def competitive_intelligence_agent(request: CompetitiveIntelRequest):
-    logger.info(f"Starting competitor intelligence for query: {request.query}")
-    logger.debug(f"Request details: {request.dict()}")
+    logger.info(f"Starting competitor intelligence for market area: {request.market_area}")
+    logger.debug(f"Request details: {request.model_dump()}")
     """Competitive intelligence using Google Search API."""
     try:
         service = build("customsearch", "v1", developerKey=google_api_key)
@@ -343,7 +342,6 @@ async def competitive_intelligence_agent(request: CompetitiveIntelRequest):
         - references:  A list of all URLs for the pages analyzed.
         """
         summary = await summarize_with_openai(prompt, content)
-        logger.info(f"Successfully completed literature analysis for query: {request.query}")
         logger.debug(f"Response data: {summary}")
         return {"success": True, "data": summary}
     except Exception as e:
@@ -353,8 +351,8 @@ async def competitive_intelligence_agent(request: CompetitiveIntelRequest):
 
 @app.post("/api/agents/regulatory-analysis")
 async def regulatory_analysis_agent(request: RegulatoryAnalysisRequest):
-    logger.info(f"Starting regulatory analysis for query: {request.query}")
-    logger.debug(f"Request details: {request.dict()}")
+    logger.info(f"Starting regulatory analysis for therapeutic area: {request.therapeutic_area}")
+    logger.debug(f"Request details: {request.model_dump()}")
     """Regulatory analysis using Google Search API."""
     try:
         service = build("customsearch", "v1", developerKey=google_api_key)
@@ -382,7 +380,6 @@ async def regulatory_analysis_agent(request: RegulatoryAnalysisRequest):
         - references: A list of all URLs for the articles analyzed.
         """
         summary = await summarize_with_openai(prompt, content)
-        logger.info(f"Successfully completed literature analysis for query: {request.query}")
         logger.debug(f"Response data: {summary}")
         return {"success": True, "data": summary}
     except Exception as e:
@@ -392,8 +389,8 @@ async def regulatory_analysis_agent(request: RegulatoryAnalysisRequest):
 
 @app.post("/api/agents/medical-writing")
 async def medical_writing_agent(request: MedicalWritingRequest):
-    logger.info(f"Starting medical writer for query: {request.query}")
-    logger.debug(f"Request details: {request.dict()}")
+    logger.info(f"Starting medical writer for report type: {request.report_type}")
+    logger.debug(f"Request details: {request.model_dump()}")
     """Medical writing agent to synthesize all findings."""
     try:
         prompt = f"""
@@ -427,7 +424,6 @@ async def medical_writing_agent(request: MedicalWritingRequest):
             response_format={"type": "json_object"}
         )
         report = json.loads(response.choices[0].message.content)
-        logger.info(f"Successfully generated report: {request.query}")
         logger.debug(f"Response data: {report}")
         return {"success": True, "data": report}
     except Exception as e:
