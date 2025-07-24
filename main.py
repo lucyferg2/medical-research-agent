@@ -10,10 +10,10 @@ from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from googleapiclient.discovery import build
 from pinecone import Pinecone
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import openai
 
-from pydantic import BaseModel, validator
+
 from typing import List, Optional
 
 # --- INITIALIZATION AND CONFIGURATION ---
@@ -59,13 +59,13 @@ class VectorSearchRequest(BaseModel):
     top_k: int = 10
     namespace: str = "Test Deck"
 
-    @validator('query', 'namespace')
+    @field_validator('query', 'namespace')
     def not_empty(cls, v):
         if not v or not v.strip():
             raise ValueError('must not be empty')
         return v
 
-    @validator('top_k')
+    @field_validator('top_k')
     def top_k_must_be_positive(cls, v):
         if v <= 0:
             raise ValueError('must be a positive integer')
@@ -76,13 +76,13 @@ class LiteratureAnalysisRequest(BaseModel):
     focus_areas: Optional[List[str]] = []
     prior_context: Optional[str] = None
 
-    @validator('query')
+    @field_validator('query')
     def query_not_empty(cls, v):
         if not v or not v.strip():
             raise ValueError('query must not be empty')
         return v
 
-    @validator('focus_areas')
+    @field_validator('focus_areas')
     def focus_areas_not_empty(cls, v):
         if any(not area.strip() for area in v):
             raise ValueError('focus_areas must not contain empty strings')
@@ -94,7 +94,7 @@ class ClinicalTrialsRequest(BaseModel):
     phase: Optional[str] = "All"
     literature_context: Optional[str] = None
     
-    @validator('phase')
+    @field_validator('phase')
     def phase_must_be_valid(cls, v):
         allowed_phases = ["All", "Phase 1", "Phase 2", "Phase 3", "Phase 4"]
         if v not in allowed_phases:
@@ -106,7 +106,7 @@ class CompetitiveIntelRequest(BaseModel):
     competitors: Optional[List[str]] = []
     clinical_context: Optional[str] = None
 
-    @validator('market_area')
+    @field_validator('market_area')
     def market_area_not_empty(cls, v):
         if not v or not v.strip():
             raise ValueError('market_area must not be empty')
@@ -117,13 +117,13 @@ class RegulatoryAnalysisRequest(BaseModel):
     regulatory_region: str = "FDA"
     competitive_context: Optional[str] = None
 
-    @validator('therapeutic_area')
+    @field_validator('therapeutic_area')
     def therapeutic_area_not_empty(cls, v):
         if not v or not v.strip():
             raise ValueError('therapeutic_area must not be empty')
         return v
 
-    @validator('regulatory_region')
+    @field_validator('regulatory_region')
     def region_must_be_valid(cls, v):
         allowed_regions = ["FDA", "EMA"]
         if v not in allowed_regions:
@@ -138,7 +138,7 @@ class MedicalWritingRequest(BaseModel):
     competitive_findings: Optional[dict] = None
     regulatory_findings: Optional[dict] = None
 
-    @validator('report_type')
+    @field_validator('report_type')
     def report_type_must_be_valid(cls, v):
         allowed_types = ["comprehensive", "executive", "technical", "strategic"]
         if v not in allowed_types:
@@ -149,13 +149,13 @@ class SequentialWorkflowRequest(BaseModel):
     query: str
     reportType: str = "comprehensive"
 
-    @validator('query')
+    @field_validator('query')
     def query_not_empty(cls, v):
         if not v or not v.strip():
             raise ValueError('query must not be empty')
         return v
 
-    @validator('reportType')
+    @field_validator('reportType')
     def report_type_must_be_valid(cls, v):
         allowed_types = ["comprehensive", "executive", "technical", "strategic"]
         if v not in allowed_types:
