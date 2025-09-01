@@ -54,7 +54,7 @@ except Exception as e:
 # Agent Request Models
 class VectorSearchRequest(BaseModel):
     query: str
-    top_k: int = 30
+    top_k: int = 25
     namespace: str = "Test Deck"
 
     @field_validator('query', 'namespace')
